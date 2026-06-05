@@ -1,0 +1,25 @@
+name: Notify consumer repos
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  trigger-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger docchi-stremio-addon update
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GH_PAT }}" \
+            https://api.github.com/repos/skoruppa/docchi-stremio-addon/actions/workflows/update-submodule.yml/dispatches \
+            -d '{"ref":"main"}'
+
+      - name: Trigger anime-nexus-nuvio update
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GH_PAT }}" \
+            https://api.github.com/repos/skoruppa/anime-nexus-nuvio/actions/workflows/update-submodule.yml/dispatches \
+            -d '{"ref":"main"}'
