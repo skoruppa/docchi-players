@@ -23,6 +23,14 @@ def dood_decode(data):
     return data + ''.join([random.choice(t) for _ in range(10)])
 
 
+def _random_ua():
+    """Generate a random Chrome User-Agent string"""
+    version = random.randint(120, 130)
+    build = random.randint(6000, 6900)
+    patch = random.randint(50, 200)
+    return f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version}.0.{build}.{patch} Safari/537.36'
+
+
 async def get_video_from_dood_player(session, player_url, is_vip: bool = False):
     """Extract video URL from DoodStream player"""
     from app.utils.common_utils import fetch_resolution_from_m3u8
@@ -35,10 +43,14 @@ async def get_video_from_dood_player(session, player_url, is_vip: bool = False):
         host = 'playmogo.com'
 
     web_url = f"https://{host}/d/{video_id}"
+    user_agent = _random_ua()
 
     try:
-        async with AsyncSession(client_identifier="chrome_120", random_tls_extension_order=True) as client:
-            headers = {'Referer': f'https://{host}/'}
+        async with AsyncSession(client_identifier="chrome_131", random_tls_extension_order=True) as client:
+            headers = {
+                'User-Agent': user_agent,
+                'Referer': f'https://{host}/'
+            }
 
             response = await client.get(web_url, headers=headers, allow_redirects=True)
             actual_url = str(response.url) if hasattr(response, 'url') else web_url
@@ -66,6 +78,12 @@ async def get_video_from_dood_player(session, player_url, is_vip: bool = False):
                 response = await client.get(embed_url, headers=headers, allow_redirects=True)
                 html = response.text
 
+            # Try to extract quality from page HTML
+            quality = 'unknown'
+            quality_match = re.search(r'(\d{3,4})[pP]', html)
+            if quality_match:
+                quality = f"{quality_match.group(1)}p"
+
             # Extract token and pass URL using dsplayer.hotkeys pattern
             match = re.search(
                 r'''dsplayer\.hotkeys[^']+'([^']+).+?function\s*makePlay.+?return[^?]+([^"]+)''',
@@ -85,8 +103,7 @@ async def get_video_from_dood_player(session, player_url, is_vip: bool = False):
             else:
                 final_url = dood_decode(base_url) + token + str(int(time.time() * 1000))
 
-            quality = 'unknown'
-            stream_headers = {'request': {'Referer': f'https://{host}/'}}
+            stream_headers = {'request': {'Referer': f'https://{host}/', 'User-Agent': user_agent}}
             return final_url, quality, stream_headers
 
     except Exception:
