@@ -5,7 +5,7 @@ from urllib.parse import unquote, urlencode
 
 # Domains handled by this player
 DOMAINS = ['drive.google.com', 'drive.usercontent.google.com']
-NAMES = ['gdrive']
+NAMES = ['gdrive', 'google']
 
 ITAG_MAP = {
     '5': '240p', '6': '270p', '17': '144p', '18': '360p', '22': '720p', '34': '360p', '35': '480p',
