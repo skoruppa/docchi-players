@@ -483,10 +483,35 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         parsed = urlparse(url)
         host = parsed.netloc
 
-        # Redirect domains
+        # Redirect domains (static list)
         if host in REDIRECT_DOMAINS or host == 'filemoon.to':
             host = 'streamlyplayer.online'
 
+        # Resolve actual API host by following embed page redirect
+        # Many byse domains (e.g. bysesukior.com) redirect /e/{id} to a different host
+        resolved_host = host
+        try:
+            check_url = f"https://{host}/e/{media_id}"
+            async with session.get(
+                check_url,
+                headers={"User-Agent": get_random_agent()},
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location", "")
+                    if location:
+                        resolved = urlparse(location)
+                        if resolved.netloc:
+                            resolved_host = resolved.netloc
+                            # Also extract media_id from redirect target if path changed
+                            redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
+                            if redirect_match:
+                                media_id = redirect_match.group(1)
+        except Exception:
+            pass  # Keep original host on failure
+
+        host = resolved_host
         ref = f"https://{host}/"
         headers = {
             "User-Agent": get_random_agent(),
