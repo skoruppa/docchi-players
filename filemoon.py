@@ -21,7 +21,7 @@ from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 from app.utils.proxy_utils import generate_proxy_url
 from config import Config
 
-PROXIFY_STREAMS = False
+PROXIFY_STREAMS = Config.PROXIFY_STREAMS
 STREAM_PROXY_URL = Config.STREAM_PROXY_URL
 STREAM_PROXY_PASSWORD = Config.STREAM_PROXY_PASSWORD
 
@@ -292,6 +292,40 @@ async def process_stream_url(session: aiohttp.ClientSession, stream_url: str, he
 
 # --- New challenge flow (June 2025+) ---
 
+async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, json_data: dict = None,
+                      extra_headers: dict = None, timeout: int = 10):
+    """POST request through proxy (if PROXIFY_STREAMS) or directly."""
+    if PROXIFY_STREAMS:
+        # Build proxy forward URL with headers as params
+        user_agent = headers.get("User-Agent", "")
+        referer = headers.get("Referer", "")
+        origin = headers.get("Origin", "")
+
+        forward_url = (
+            f'{STREAM_PROXY_URL}/proxy/forward?d={url}'
+            f'&api_password={STREAM_PROXY_PASSWORD}'
+            f'&h_user-agent={user_agent}'
+            f'&h_referer={referer}'
+            f'&h_origin={origin}'
+            f'&h_content-type=application/json'
+        )
+        # Add extra headers (X-Embed-*, X-Captcha-Token, cookies)
+        if extra_headers:
+            for k, v in extra_headers.items():
+                forward_url += f'&h_{k.lower()}={v}'
+
+        async with session.post(forward_url, json=json_data, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+    else:
+        all_headers = dict(headers)
+        if extra_headers:
+            all_headers.update(extra_headers)
+        async with session.post(url, headers=all_headers, json=json_data, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str):
     """
     Perform the full challenge flow:
@@ -318,9 +352,7 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
 
     # --- Step 1: Challenge ---
     challenge_url = f"{base}/api/videos/access/challenge"
-    async with session.post(challenge_url, headers=api_headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-        resp.raise_for_status()
-        challenge_data = await resp.json()
+    challenge_data = await _proxy_post(session, challenge_url, api_headers)
 
     challenge_id = challenge_data["challenge_id"]
     nonce = challenge_data["nonce"]
@@ -344,35 +376,33 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
         "attributes": {"entropy": "low"}
     }
 
-    async with session.post(attest_url, headers=api_headers, json=attest_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-        resp.raise_for_status()
-        attest_data = await resp.json()
+    attest_data = await _proxy_post(session, attest_url, api_headers, attest_payload)
 
     token = attest_data["token"]
     viewer_id = attest_data["viewer_id"]
     device_id = attest_data["device_id"]
     confidence = attest_data["confidence"]
 
-    # Set cookies for subsequent requests
-    session.cookie_jar.update_cookies({
-        "byse_viewer_id": viewer_id,
-        "byse_device_id": device_id,
-    }, response_url=yarl.URL(base))
+    # Set cookies for subsequent requests (only needed for non-proxy mode)
+    if not PROXIFY_STREAMS:
+        session.cookie_jar.update_cookies({
+            "byse_viewer_id": viewer_id,
+            "byse_device_id": device_id,
+        }, response_url=yarl.URL(base))
 
     # --- Step 3: Captcha (get PoW challenge) ---
     captcha_url = f"{base}/api/videos/{media_id}/embed/captcha"
     fp_payload = _build_fingerprint_payload(token, viewer_id, device_id, confidence)
 
-    # Embed-aware headers for captcha/playback endpoints
-    embed_headers = dict(api_headers)
-    embed_headers["Content-Type"] = "application/json"
-    embed_headers["X-Embed-Origin"] = "docchi.pl"
-    embed_headers["X-Embed-Referer"] = "https://docchi.pl/"
-    embed_headers["X-Embed-Parent"] = embed_url
+    # Extra headers for embed endpoints
+    embed_extra = {
+        "X-Embed-Origin": "docchi.pl",
+        "X-Embed-Referer": "https://docchi.pl/",
+        "X-Embed-Parent": embed_url,
+        "Cookie": f"byse_viewer_id={viewer_id}; byse_device_id={device_id}",
+    }
 
-    async with session.post(captcha_url, headers=embed_headers, json=fp_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-        resp.raise_for_status()
-        captcha_data = await resp.json()
+    captcha_data = await _proxy_post(session, captcha_url, api_headers, fp_payload, embed_extra)
 
     pow_nonce = captcha_data["pow_nonce"]
     pow_difficulty = captcha_data["pow_difficulty"]
@@ -388,9 +418,7 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
         "fingerprint": fp_payload["fingerprint"],
     }
 
-    async with session.post(verify_url, headers=embed_headers, json=verify_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-        resp.raise_for_status()
-        verify_data = await resp.json()
+    verify_data = await _proxy_post(session, verify_url, api_headers, verify_payload, embed_extra)
 
     if verify_data.get("status") != "ok":
         raise Exception(f"PoW verification failed: {verify_data}")
@@ -399,12 +427,10 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
 
     # --- Step 5: Get playback with captcha token ---
     playback_url = f"{base}/api/videos/{media_id}/embed/playback"
-    playback_headers = dict(embed_headers)
-    playback_headers["X-Captcha-Token"] = captcha_token
+    playback_extra = dict(embed_extra)
+    playback_extra["X-Captcha-Token"] = captcha_token
 
-    async with session.post(playback_url, headers=playback_headers, json=fp_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-        resp.raise_for_status()
-        data = await resp.json()
+    data = await _proxy_post(session, playback_url, api_headers, fp_payload, playback_extra)
 
     return data
 
@@ -492,22 +518,43 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         resolved_host = host
         try:
             check_url = f"https://{host}/e/{media_id}"
-            async with session.get(
-                check_url,
-                headers={"User-Agent": get_random_agent()},
-                allow_redirects=False,
-                timeout=aiohttp.ClientTimeout(total=5)
-            ) as resp:
-                if resp.status in (301, 302, 303, 307, 308):
-                    location = resp.headers.get("Location", "")
-                    if location:
-                        resolved = urlparse(location)
-                        if resolved.netloc:
-                            resolved_host = resolved.netloc
-                            # Also extract media_id from redirect target if path changed
-                            redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
-                            if redirect_match:
-                                media_id = redirect_match.group(1)
+            if PROXIFY_STREAMS:
+                # Use proxy for redirect check too (same IP must be used)
+                proxied_check = (
+                    f'{STREAM_PROXY_URL}/proxy/stream?d={check_url}'
+                    f'&api_password={STREAM_PROXY_PASSWORD}'
+                    f'&h_user-agent={get_random_agent()}'
+                )
+                async with session.get(
+                    proxied_check,
+                    allow_redirects=False,
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status in (301, 302, 303, 307, 308):
+                        location = resp.headers.get("Location", "")
+                        if location:
+                            resolved = urlparse(location)
+                            if resolved.netloc:
+                                resolved_host = resolved.netloc
+                                redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
+                                if redirect_match:
+                                    media_id = redirect_match.group(1)
+            else:
+                async with session.get(
+                    check_url,
+                    headers={"User-Agent": get_random_agent()},
+                    allow_redirects=False,
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status in (301, 302, 303, 307, 308):
+                        location = resp.headers.get("Location", "")
+                        if location:
+                            resolved = urlparse(location)
+                            if resolved.netloc:
+                                resolved_host = resolved.netloc
+                                redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
+                                if redirect_match:
+                                    media_id = redirect_match.group(1)
         except Exception:
             pass  # Keep original host on failure
 
