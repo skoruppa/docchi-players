@@ -1,22 +1,29 @@
 import re
 import json
 import base64
+import ctypes
+import os
 import aiohttp
+import yarl
 from binascii import hexlify
 from hashlib import sha256
 from os import urandom
 from time import time
-from random import uniform
-from urllib.parse import urljoin, urlparse, quote
+from random import uniform, randint, choice
+from urllib.parse import urljoin, urlparse
+
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+
 from Crypto.Cipher import AES
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 from app.utils.proxy_utils import generate_proxy_url
 from config import Config
 
-PROXIFY_STREAMS = Config.PROXIFY_STREAMS
+PROXIFY_STREAMS = False
 STREAM_PROXY_URL = Config.STREAM_PROXY_URL
 STREAM_PROXY_PASSWORD = Config.STREAM_PROXY_PASSWORD
-
 
 
 # Domains handled by this player
@@ -32,10 +39,11 @@ NAMES = ['filemoon', 'byse']
 
 REDIRECT_DOMAINS = ['boosteradx.online', 'byse.sx']
 
-
 # NOTE: Requires proxy for IP-bound extraction and stream playback
 ENABLED = True
 
+
+# --- Crypto helpers ---
 
 def ft(e: str) -> bytes:
     """Base64 decode with URL-safe alphabet"""
@@ -64,15 +72,382 @@ def _b64urlencode(data, strip=True):
     return encoded
 
 
-def fp(x=16, y=0.6, z=0.9):
-    """Generate fingerprint payload for API auth."""
-    v_id = hexlify(urandom(x)).decode()
-    d_id = hexlify(urandom(x)).decode()
+def _generate_ec_keypair():
+    """Generate an ECDSA P-256 key pair and return (private_key, jwk_public_key_dict)."""
+    private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+    public_key = private_key.public_key()
+    public_numbers = public_key.public_numbers()
+
+    # Convert x, y to base64url (32 bytes each for P-256)
+    x_bytes = public_numbers.x.to_bytes(32, byteorder='big')
+    y_bytes = public_numbers.y.to_bytes(32, byteorder='big')
+
+    jwk = {
+        "alg": "ES256",
+        "crv": "P-256",
+        "ext": True,
+        "key_ops": ["verify"],
+        "kty": "EC",
+        "x": _b64urlencode(x_bytes),
+        "y": _b64urlencode(y_bytes),
+    }
+    return private_key, jwk
+
+
+def _sign_nonce(private_key, nonce: str) -> str:
+    """Sign the nonce with ECDSA P-256 (SHA-256) and return base64url signature."""
+    signature = private_key.sign(
+        nonce.encode(),
+        ec.ECDSA(hashes.SHA256())
+    )
+    return _b64urlencode(signature)
+
+
+def _solve_pow(nonce: str, difficulty: int, max_iterations: int = 200000) -> str:
+    """
+    Solve Byse Proof-of-Work challenge using native C solver.
+    The hash is a custom memory-hard function (NOT standard SHA-256).
+    Format: hash(nonce + ":" + counter_str), check leading zero bits.
+    """
+    import time as _t
+    start = _t.time()
+    try:
+        result = _solve_pow_native(nonce, difficulty, max_iterations)
+        elapsed = (_t.time() - start) * 1000
+        print(f"Filemoon PoW solved (native): solution={result}, difficulty={difficulty}, time={elapsed:.0f}ms")
+        return result
+    except Exception as e:
+        print(f"Filemoon PoW native solver unavailable ({e}), using Python fallback")
+        result = _solve_pow_python(nonce, difficulty, max_iterations)
+        elapsed = (_t.time() - start) * 1000
+        print(f"Filemoon PoW solved (python): solution={result}, difficulty={difficulty}, time={elapsed:.0f}ms")
+        return result
+
+
+def _solve_pow_native(nonce: str, difficulty: int, max_iterations: int) -> str:
+    """Solve PoW using compiled C library for speed (~50ms for difficulty 12)."""
+    lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pow_solver.so')
+    lib = ctypes.CDLL(lib_path)
+    lib.pow_solve.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    lib.pow_solve.restype = ctypes.c_int
+
+    solution_buf = ctypes.create_string_buffer(32)
+    result = lib.pow_solve(nonce.encode(), difficulty, max_iterations, solution_buf, 32)
+
+    if result >= 0:
+        return solution_buf.value.decode()
+    raise RuntimeError(f"PoW solver: no solution found in {max_iterations} iterations")
+
+
+def _solve_pow_python(nonce: str, difficulty: int, max_iterations: int) -> str:
+    """Pure Python fallback PoW solver (slow but functional)."""
+    BUFFER_SIZE = 512
+    BUFFER_MASK = 511
+    INIT_CONST = 2654435761
+    FINAL_CONST = 2246822519
+    MASK32 = 0xFFFFFFFF
+
+    def _rl(val, shift):
+        return ((val << shift) | (val >> (32 - shift))) & MASK32
+
+    prefix = (nonce + ":").encode('latin-1')
+
+    for counter in range(max_iterations):
+        input_bytes = prefix + str(counter).encode('latin-1')
+
+        s0, s1, s2, s3 = 1779033703, 3144134277, 1013904242, 2773480762
+
+        for b in input_bytes:
+            s0 = (s0 + b) & MASK32
+            s0 = _rl(s0, 7)
+            s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 16)
+            s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 12)
+            s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 8)
+            s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 7)
+
+        for _ in range(8):
+            s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 16)
+            s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 12)
+            s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 8)
+            s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 7)
+
+        buf = [0] * BUFFER_SIZE
+        for i in range(BUFFER_SIZE):
+            s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 16)
+            s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 12)
+            s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 8)
+            s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 7)
+            buf[i] = (s0 ^ s2) & MASK32
+
+        for _ in range(2):
+            for si in range(BUFFER_SIZE):
+                a = buf[si] & BUFFER_MASK
+                c = (buf[si] + buf[a]) & MASK32
+                c = _rl(c, 13)
+                c = (c ^ ((buf[(si + 1) & BUFFER_MASK] * INIT_CONST) & MASK32)) & MASK32
+                buf[si] = c
+                s0 = (s0 ^ c) & MASK32
+                s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 16)
+                s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 12)
+                s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 8)
+                s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 7)
+
+        s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 16)
+        s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 12)
+        s0 = (s0 + s1) & MASK32; s3 = _rl(s3 ^ s0, 8)
+        s2 = (s2 + s3) & MASK32; s1 = _rl(s1 ^ s2, 7)
+
+        out_val = s0
+        for ci in range(64):
+            d = buf[ci]
+            out_val = (out_val + d) & MASK32
+            out_val = _rl(out_val, 5)
+            out_val = (out_val ^ ((d * FINAL_CONST) & MASK32)) & MASK32
+        out_val = (out_val ^ s2) & MASK32
+
+        leading = 32 - out_val.bit_length() if out_val > 0 else 32
+        if leading >= difficulty:
+            return str(counter)
+
+    raise RuntimeError(f"PoW solver (Python): no solution found in {max_iterations} iterations")
+
+
+def _generate_client_fingerprint():
+    """Generate a realistic-looking client fingerprint for the attest request."""
+    screen_widths = [1920, 2560, 1366, 1440, 1680]
+    screen_heights = [1080, 1440, 768, 900, 1050]
+    idx = randint(0, len(screen_widths) - 1)
+
+    webgl_vendors = ["Intel", "NVIDIA Corporation", "AMD"]
+    webgl_renderers = [
+        "Intel(R) HD Graphics, or similar",
+        "ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.5)",
+        "ANGLE (NVIDIA, NVIDIA GeForce GTX 1070, OpenGL 4.5)",
+        "Mesa Intel(R) UHD Graphics 620 (KBL GT2)",
+    ]
+
+    # Generate random hashes for canvas, audio, webgl, fonts, codecs
+    def rand_hash():
+        return _b64urlencode(urandom(32))
+
+    return {
+        "user_agent": get_random_agent(),
+        "pixel_ratio": choice([1, 2]),
+        "screen_width": screen_widths[idx],
+        "screen_height": screen_heights[idx],
+        "color_depth": 24,
+        "languages": ["pl", "en-US", "en"],
+        "timezone": "Europe/Warsaw",
+        "hardware_concurrency": choice([4, 8, 12, 16]),
+        "touch_points": 0,
+        "webgl_vendor": choice(webgl_vendors),
+        "webgl_renderer": choice(webgl_renderers),
+        "canvas_hash": rand_hash(),
+        "audio_hash": rand_hash(),
+        "webgl_params_hash": rand_hash(),
+        "fonts_hash": rand_hash(),
+        "codecs_hash": rand_hash(),
+        "media_devices": "ai0ao0vi0",
+        "pointer_type": "fine,hover",
+        "extra": {"vendor": "", "appVersion": "5.0 (X11)"}
+    }
+
+
+def _build_fingerprint_payload(token: str, viewer_id: str, device_id: str, confidence: float):
+    """Build the fingerprint dict used in captcha and playback requests."""
+    return {
+        "fingerprint": {
+            "token": token,
+            "viewer_id": viewer_id,
+            "device_id": device_id,
+            "confidence": confidence,
+        }
+    }
+
+
+# --- Stream processing ---
+
+async def process_stream_url(session: aiohttp.ClientSession, stream_url: str, headers: dict, url: str) -> tuple:
+    """Process stream URL and return final URL, quality, and headers."""
+    if stream_url.startswith('/'):
+        stream_url = urljoin(url, stream_url)
+    stream_headers = {'request': headers}
+
+    if PROXIFY_STREAMS:
+        stream_url = await generate_proxy_url(
+            session,
+            stream_url,
+            '/proxy/hls/manifest.m3u8',
+            request_headers=headers
+        )
+        stream_headers = None
+
+    try:
+        quality = await fetch_resolution_from_m3u8(session, stream_url, headers) or "unknown"
+    except Exception:
+        quality = "unknown"
+
+    return stream_url, quality, stream_headers
+
+
+# --- New challenge flow (June 2025+) ---
+
+async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str):
+    """
+    Perform the full challenge flow:
+    1. /api/videos/access/challenge
+    2. /api/videos/access/attest
+    3. /api/videos/{id}/embed/captcha (PoW)
+    4. /api/videos/{id}/embed/captcha/verify
+    5. /api/videos/{id}/embed/playback (with X-Captcha-Token)
+    """
+    base = f"https://{host}"
+    user_agent = headers["User-Agent"]
+
+    # Referer must point to the embed page path
+    parsed_embed = urlparse(embed_url)
+    page_referer = f"{base}{parsed_embed.path}" if parsed_embed.netloc != host else embed_url
+
+    # Base headers for all API requests in this flow
+    api_headers = {
+        "User-Agent": user_agent,
+        "Accept": "*/*",
+        "Referer": page_referer,
+        "Origin": base,
+    }
+
+    # --- Step 1: Challenge ---
+    challenge_url = f"{base}/api/videos/access/challenge"
+    async with session.post(challenge_url, headers=api_headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp.raise_for_status()
+        challenge_data = await resp.json()
+
+    challenge_id = challenge_data["challenge_id"]
+    nonce = challenge_data["nonce"]
+
+    # --- Step 2: Attest (ECDSA sign nonce + client fingerprint) ---
+    private_key, public_key_jwk = _generate_ec_keypair()
+    signature = _sign_nonce(private_key, nonce)
+    client_fp = _generate_client_fingerprint()
+    client_fp["user_agent"] = user_agent
+
+    attest_url = f"{base}/api/videos/access/attest"
+    attest_payload = {
+        "viewer_id": "",
+        "device_id": "",
+        "challenge_id": challenge_id,
+        "nonce": nonce,
+        "signature": signature,
+        "public_key": public_key_jwk,
+        "client": client_fp,
+        "storage": {},
+        "attributes": {"entropy": "low"}
+    }
+
+    async with session.post(attest_url, headers=api_headers, json=attest_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp.raise_for_status()
+        attest_data = await resp.json()
+
+    token = attest_data["token"]
+    viewer_id = attest_data["viewer_id"]
+    device_id = attest_data["device_id"]
+    confidence = attest_data["confidence"]
+
+    # Set cookies for subsequent requests
+    session.cookie_jar.update_cookies({
+        "byse_viewer_id": viewer_id,
+        "byse_device_id": device_id,
+    }, response_url=yarl.URL(base))
+
+    # --- Step 3: Captcha (get PoW challenge) ---
+    captcha_url = f"{base}/api/videos/{media_id}/embed/captcha"
+    fp_payload = _build_fingerprint_payload(token, viewer_id, device_id, confidence)
+
+    # Embed-aware headers for captcha/playback endpoints
+    embed_headers = dict(api_headers)
+    embed_headers["Content-Type"] = "application/json"
+    embed_headers["X-Embed-Origin"] = "docchi.pl"
+    embed_headers["X-Embed-Referer"] = "https://docchi.pl/"
+    embed_headers["X-Embed-Parent"] = embed_url
+
+    async with session.post(captcha_url, headers=embed_headers, json=fp_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp.raise_for_status()
+        captcha_data = await resp.json()
+
+    pow_nonce = captcha_data["pow_nonce"]
+    pow_difficulty = captcha_data["pow_difficulty"]
+    pow_token = captcha_data["pow_token"]
+
+    # --- Step 4: Solve PoW and verify ---
+    solution = _solve_pow(pow_nonce, pow_difficulty)
+
+    verify_url = f"{base}/api/videos/{media_id}/embed/captcha/verify"
+    verify_payload = {
+        "pow_token": pow_token,
+        "solution": solution,
+        "fingerprint": fp_payload["fingerprint"],
+    }
+
+    async with session.post(verify_url, headers=embed_headers, json=verify_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp.raise_for_status()
+        verify_data = await resp.json()
+
+    if verify_data.get("status") != "ok":
+        raise Exception(f"PoW verification failed: {verify_data}")
+
+    captcha_token = verify_data["token"]
+
+    # --- Step 5: Get playback with captcha token ---
+    playback_url = f"{base}/api/videos/{media_id}/embed/playback"
+    playback_headers = dict(embed_headers)
+    playback_headers["X-Captcha-Token"] = captcha_token
+
+    async with session.post(playback_url, headers=playback_headers, json=fp_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp.raise_for_status()
+        data = await resp.json()
+
+    return data
+
+
+# --- Legacy flow (direct /playback) ---
+
+async def _do_legacy_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict):
+    """Legacy flow: POST directly to /api/videos/{id}/playback with fingerprint."""
+    api_url = f"https://{host}/api/videos/{media_id}/playback"
+    form_data = _build_legacy_fingerprint()
+    ref = f"https://{host}/"
+
+    if PROXIFY_STREAMS:
+        user_agent = headers['User-Agent']
+        forward_url = (
+            f'{STREAM_PROXY_URL}/proxy/forward?d={api_url}'
+            f'&api_password={STREAM_PROXY_PASSWORD}'
+            f'&h_user-agent={user_agent}&h_referer={ref}'
+            f'&h_origin={ref.rstrip("/")}&h_content-type=application/json'
+        )
+        async with session.post(forward_url, json=form_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            response.raise_for_status()
+            return await response.json()
+    else:
+        legacy_headers = {
+            "User-Agent": headers["User-Agent"],
+            "Referer": ref,
+            "Origin": ref.rstrip('/'),
+        }
+        async with session.post(api_url, headers=legacy_headers, json=form_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            response.raise_for_status()
+            return await response.json()
+
+
+def _build_legacy_fingerprint():
+    """Build the old-style fingerprint for legacy /playback endpoint."""
+    v_id = hexlify(urandom(16)).decode()
+    d_id = hexlify(urandom(16)).decode()
     ctime = int(time())
     t_data = {
         'viewer_id': v_id,
         'device_id': d_id,
-        'confidence': round(uniform(y, z), 2),
+        'confidence': round(uniform(0.6, 0.9), 2),
         'iat': ctime,
         'exp': ctime + 600
     }
@@ -85,53 +460,25 @@ def fp(x=16, y=0.6, z=0.9):
     return {'fingerprint': t_data}
 
 
-
-async def process_stream_url(session: aiohttp.ClientSession, stream_url: str, headers: dict, url: str) -> tuple:
-    """Process stream URL and return final URL, quality, and headers."""
-    # Handle relative URLs
-    if stream_url.startswith('/'):
-        stream_url = urljoin(url, stream_url)
-    stream_headers = {'request': headers}
-    # Proxify m3u8 if VIP stream proxy is enabled
-    if PROXIFY_STREAMS:
-        stream_url = await generate_proxy_url(
-            session, 
-            stream_url, 
-            '/proxy/hls/manifest.m3u8',
-            request_headers=headers
-        )
-        stream_headers = None
-
-    # Fetch quality from m3u8
-    try:
-        quality = await fetch_resolution_from_m3u8(session, stream_url, headers) or "unknown"
-    except Exception:
-        quality = "unknown"
-
-
-    return stream_url, quality, stream_headers
-
+# --- Main entry point ---
 
 async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False):
     """
-    Extract video URL from Filemoon/F16Px player.
-    Supports both plain JSON sources and AES-GCM encrypted playback data.
-    VIP only (or local selfhost without proxy).
+    Extract video URL from Filemoon/Byse player.
+    Supports both legacy flow and new challenge flow (June 2025+).
     """
-    # Filemoon requires VIP (unless FORCE_VIP_PLAYERS is enabled)
     if not is_vip and not Config.FORCE_VIP_PLAYERS:
         return None, None, None
-    
+
     try:
         # Extract media_id from URL
-        # Pattern: /e/MEDIA_ID or /d/MEDIA_ID or /download/MEDIA_ID
-        pattern = r'/(?:e|eyi|d|download)/([0-9a-zA-Z]+)'
+        pattern = r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)'
         match = re.search(pattern, url)
-        
+
         if not match:
             print("Filemoon Player Error: Invalid URL format")
             return None, None, None
-        
+
         media_id = match.group(1)
         parsed = urlparse(url)
         host = parsed.netloc
@@ -139,37 +486,37 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         # Redirect domains
         if host in REDIRECT_DOMAINS or host == 'filemoon.to':
             host = 'streamlyplayer.online'
-        
-        # Build API URL
+
         ref = f"https://{host}/"
-        api_url = f"https://{host}/api/videos/{media_id}/playback"
-        
         headers = {
             "User-Agent": get_random_agent(),
-            "Referer": ref,
-            "Origin": ref.rstrip('/')
+            "Referer": url,  # Referer = the embed page URL
+            "Origin": f"https://{host}"
         }
-        
-        form_data = fp()
-        
-        # Use /proxy/forward for extraction (supports POST, preserves IP binding)
-        if PROXIFY_STREAMS:
-            user_agent = headers['User-Agent']
-            forward_url = f'{STREAM_PROXY_URL}/proxy/forward?d={api_url}&api_password={STREAM_PROXY_PASSWORD}&h_user-agent={user_agent}&h_referer={ref}&h_origin={ref.rstrip("/")}&h_content-type=application/json'
-            async with session.post(forward_url, json=form_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                response.raise_for_status()
-                data = await response.json()
-        else:
-            async with session.post(api_url, headers=headers, json=form_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                response.raise_for_status()
-                data = await response.json()
-        
+
+        # Try legacy flow first, fall back to new challenge flow on 428
+        data = None
+        try:
+            data = await _do_legacy_flow(session, host, media_id, headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 428:
+                # New challenge flow required
+                # X-Embed-Parent uses /e/ path format
+                embed_url = f"https://{host}/e/{media_id}"
+                data = await _do_challenge_flow(session, host, media_id, headers, embed_url)
+            else:
+                raise
+
+        if not data:
+            print("Filemoon Player Error: Empty response")
+            return None, None, None
+
         sources = None
-        
+
         # Try plain sources first
         if data.get('sources'):
             sources = data.get('sources')
-        
+
         # Try encrypted playback data
         if not sources and data.get('playback'):
             pd = data.get('playback')
@@ -177,12 +524,11 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
                 iv = ft(pd.get('iv'))
                 key = xn(pd.get('key_parts'), pd.get('version'))
                 payload = ft(pd.get('payload'))
-                
+
                 # AES-GCM: last 16 bytes are the authentication tag
                 ciphertext = payload[:-16]
                 tag = payload[-16:]
-                
-                # Decrypt using AES-GCM
+
                 cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
                 decrypted = cipher.decrypt_and_verify(ciphertext, tag)
                 ct = json.loads(decrypted.decode('latin-1'))
@@ -194,14 +540,13 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
             sources_list = [x.get('url') for x in sources if x.get('url')]
             if sources_list:
                 stream_url = sources_list[0]
-                # Handle relative URLs
                 if stream_url.startswith('/'):
-                    stream_url = urljoin(api_url, stream_url)
+                    stream_url = urljoin(f"https://{host}/", stream_url)
                 return await process_stream_url(session, stream_url, headers, url)
-        
+
         print("Filemoon Player Error: No video sources found")
         return None, None, None
-        
+
     except Exception as e:
         print(f"Filemoon Player Error: {e}")
         return None, None, None
