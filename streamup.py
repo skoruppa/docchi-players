@@ -88,6 +88,9 @@ async def get_video_from_streamup_player(session: aiohttp.ClientSession, player_
                 async with session.get(s_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as s_response:
                     s_response.raise_for_status()
                     response = await s_response.text()
+                if not response or not response.strip():
+                    print(f"StreamUP Player Error: Empty response from {s_url}")
+                    return None, None, None
                 stream_info = json.loads(response)
 
             stream_url = stream_info.get("streaming_url")
