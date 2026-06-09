@@ -135,7 +135,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         return None, None, None
 
     except Exception as e:
-        logging.error(f"Lycoris Player Error: An unexpected error occurred: {e}")
+        logging.error(f"Lycoris Player Error: An unexpected error occurred: {type(e).__name__}: {e}")
         # Try Rumble fallback if available
         if rumble_url:
             try:
