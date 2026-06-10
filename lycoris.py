@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import aiohttp
 import base64
@@ -134,6 +135,14 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
 
         return None, None, None
 
+    except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+        logging.error(f"Lycoris Player Error: Timeout")
+        if rumble_url:
+            try:
+                return await get_video_from_rumble_player(session, rumble_url)
+            except Exception:
+                pass
+        return None, None, None
     except Exception as e:
         logging.error(f"Lycoris Player Error: An unexpected error occurred: {type(e).__name__}: {e}")
         # Try Rumble fallback if available

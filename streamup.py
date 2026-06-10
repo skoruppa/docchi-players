@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import re
 import aiohttp
@@ -112,10 +113,14 @@ async def get_video_from_streamup_player(session: aiohttp.ClientSession, player_
 
         return stream_url, quality, stream_headers
 
+    except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+        print(f"StreamUP Player Error: Timeout connecting to {player_url}")
+        return None, None, None
+    except aiohttp.ClientError as e:
+        print(f"StreamUP Player Error: {type(e).__name__}: {e}")
+        return None, None, None
     except Exception as e:
-        import traceback
-        print(f"StreamUP Player Error: Unexpected Error: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
+        print(f"StreamUP Player Error: {type(e).__name__}: {e}")
         return None, None, None
 
 
