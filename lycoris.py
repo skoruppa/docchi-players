@@ -43,8 +43,10 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
     user_agent = get_random_agent()
     headers = {"User-Agent": user_agent}
     rumble_url = None
+    _last_step = "init"
     
     try:
+        _last_step = f"GET {url}"
         async with session.get(url, headers=headers, ssl=False) as response:
             response.raise_for_status()
             html = await response.text()
@@ -97,6 +99,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
 
         # Get encoded video link
         video_link_url = f"https://www.lycoris.cafe/api/watch/getVideoLink?id={episode_id}"
+        _last_step = f"GET {video_link_url}"
         async with session.get(video_link_url, headers={"User-Agent": _compat_ua}) as link_response:
             link_response.raise_for_status()
             encrypted_text = await link_response.text()
@@ -111,6 +114,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         }
         payload = {"encoded": base64_encoded_data}
 
+        _last_step = f"POST {decrypt_url}"
         async with session.post(decrypt_url, headers=decrypt_headers, json=payload) as decrypt_response:
             decrypt_response.raise_for_status()
             video_sources = await decrypt_response.json()
@@ -125,6 +129,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
 
         if highest_quality:
             url_candidate, quality = highest_quality['url'], highest_quality['quality']
+            _last_step = f"check_url_status {url_candidate}"
             status = await check_url_status(session, url_candidate)
             if status in (200, 206):
                 return url_candidate, quality, None
@@ -136,7 +141,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         return None, None, None
 
     except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
-        logging.error(f"Lycoris Player Error: Timeout")
+        logging.error(f"Lycoris Player Error: Timeout at: {_last_step}")
         if rumble_url:
             try:
                 return await get_video_from_rumble_player(session, rumble_url)
