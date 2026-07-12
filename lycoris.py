@@ -128,11 +128,13 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
             highest_quality = {"url": video_sources['SD'], 'quality': '480p'}
 
         if highest_quality:
-            url_candidate, quality = highest_quality['url'], highest_quality['quality']
-            _last_step = f"check_url_status {url_candidate}"
-            status = await check_url_status(session, url_candidate)
-            if status in (200, 206):
-                return url_candidate, quality, None
+            url_candidates = [u.strip() for u in highest_quality['url'].split(' or ') if u.strip()]
+            quality = highest_quality['quality']
+            for url_candidate in url_candidates:
+                _last_step = f"check_url_status {url_candidate}"
+                status = await check_url_status(session, url_candidate)
+                if status in (200, 206):
+                    return url_candidate, quality, None
 
         # Fallback to Rumble if primary sources fail
         if rumble_url:
@@ -163,7 +165,7 @@ if __name__ == '__main__':
     from app.players.test import run_tests
 
     urls_to_test = [
-        "https://www.lycoris.cafe/embed?id=181447&episode=10",
+        "https://www.lycoris.cafe/embed?id=210031&episode=1",
     ]
 
     run_tests(get_video_from_lycoris_player, urls_to_test)

@@ -265,6 +265,14 @@ def _build_fingerprint_payload(token: str, viewer_id: str, device_id: str, confi
     }
 
 
+# --- Embed origin mapping per translator ---
+# Some uploaders define a specific domain for embed origin headers.
+# Map translator names (lowercased) to their embed domain.
+TRANSLATOR_EMBED_ORIGINS = {
+    'desu-online': 'desu-online.pl',
+}
+
+
 # --- Stream processing ---
 
 async def process_stream_url(session: aiohttp.ClientSession, stream_url: str, headers: dict, url: str) -> tuple:
@@ -326,7 +334,7 @@ async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, j
             return await resp.json()
 
 
-async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str):
+async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str, translator: str = ''):
     """
     Perform the full challenge flow:
     1. /api/videos/access/challenge
@@ -338,9 +346,13 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     base = f"https://{host}"
     user_agent = headers["User-Agent"]
 
+    # Determine embed origin based on translator
+    translator_lower = translator.lower().strip() if translator else ''
+    embed_origin_domain = TRANSLATOR_EMBED_ORIGINS.get(translator_lower, 'docchi.pl')
+
     # Referer must point to the embed page path
     parsed_embed = urlparse(embed_url)
-    page_referer = f"{base}{parsed_embed.path}" if parsed_embed.netloc != host else embed_url
+    page_referer = f'https://{embed_origin_domain}/'
 
     # Base headers for all API requests in this flow
     api_headers = {
@@ -396,8 +408,8 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
 
     # Extra headers for embed endpoints
     embed_extra = {
-        "X-Embed-Origin": "docchi.pl",
-        "X-Embed-Referer": "https://docchi.pl/",
+        "X-Embed-Origin": embed_origin_domain,
+        "X-Embed-Referer": f"https://{embed_origin_domain}/",
         "X-Embed-Parent": embed_url,
         "Cookie": f"byse_viewer_id={viewer_id}; byse_device_id={device_id}",
     }
@@ -488,7 +500,7 @@ def _build_legacy_fingerprint():
 
 # --- Main entry point ---
 
-async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False):
+async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False, translator: str = ''):
     """
     Extract video URL from Filemoon/Byse player.
     Supports both legacy flow and new challenge flow (June 2025+).
@@ -575,7 +587,7 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
                 # New challenge flow required
                 # X-Embed-Parent uses /e/ path format
                 embed_url = f"https://{host}/e/{media_id}"
-                data = await _do_challenge_flow(session, host, media_id, headers, embed_url)
+                data = await _do_challenge_flow(session, host, media_id, headers, embed_url, translator)
             else:
                 raise
 
@@ -628,7 +640,7 @@ if __name__ == '__main__':
     from app.players.test import run_tests
 
     urls_to_test = [
-        "https://rupertisdivingintoocean.com/eyi/qgdk9knxn0d3",
+        "https://bysesukior.com/e/88vt8qvbcclg",
     ]
 
-    run_tests(get_video_from_filemoon_player, urls_to_test, True)
+    run_tests(get_video_from_filemoon_player, urls_to_test, True, translator='Desu-Online')

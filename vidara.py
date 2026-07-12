@@ -4,8 +4,8 @@ from urllib.parse import urljoin, urlparse
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 
 # Domains handled by this player
-DOMAINS = ['vidara.so', 'vidara.to', 'streamix.so', 'stmix.io']
-NAMES = ['vidara', 'streamix']
+DOMAINS = ['vidara.so', 'vidara.to', 'vidaraa.cc', 'vidavaca.cc', 'streamix.so', 'stmix.io']
+NAMES = ['vidara', 'vidavaca', 'streamix']
 
 ENABLED = True
 
@@ -23,11 +23,11 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
         host = parsed.netloc
         ref = urljoin(url, '/')
 
-        # vidara uses /api/, streamix uses /ajax/
-        if 'vidara' in host:
-            api_url = f"https://{host}/api/stream"
-        else:
+        # vidara/vidavaca uses /api/, streamix uses /ajax/
+        if 'stmix' in host or 'streamix' in host:
             api_url = f"https://{host}/ajax/stream"
+        else:
+            api_url = f"https://{host}/api/stream"
 
         headers = {
             "User-Agent": get_random_agent(),
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     from app.players.test import run_tests
 
     urls_to_test = [
-        "https://vidara.to/e/E0PwlcdTTVuTZ",
+        "https://vidavaca.cc/e/RzV4IEzlG1ZxG",
     ]
 
     run_tests(get_video_from_vidara_player, urls_to_test)
