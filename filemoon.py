@@ -301,7 +301,7 @@ async def process_stream_url(session: aiohttp.ClientSession, stream_url: str, he
 # --- New challenge flow (June 2025+) ---
 
 async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, json_data: dict = None,
-                      extra_headers: dict = None, timeout: int = 10):
+                      extra_headers: dict = None, timeout: int = 4):
     """POST request through proxy (if PROXIFY_STREAMS) or directly."""
     if PROXIFY_STREAMS:
         # Build proxy forward URL with headers as params
@@ -337,12 +337,13 @@ async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, j
 async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str, translator: str = ''):
     """
     Perform the full challenge flow:
-    1. /api/videos/access/challenge
-    2. /api/videos/access/attest
+    1. /api/videos/access/challenge  \
+    2. /api/videos/access/attest      } These don't need media_id
     3. /api/videos/{id}/embed/captcha (PoW)
     4. /api/videos/{id}/embed/captcha/verify
     5. /api/videos/{id}/embed/playback (with X-Captcha-Token)
     """
+    import asyncio as _asyncio
     base = f"https://{host}"
     user_agent = headers["User-Agent"]
 
@@ -362,14 +363,14 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
         "Origin": base,
     }
 
-    # --- Step 1: Challenge ---
+    # --- Step 1 + 2: Challenge + Attest (done together, no media_id needed) ---
     challenge_url = f"{base}/api/videos/access/challenge"
     challenge_data = await _proxy_post(session, challenge_url, api_headers)
 
     challenge_id = challenge_data["challenge_id"]
     nonce = challenge_data["nonce"]
 
-    # --- Step 2: Attest (ECDSA sign nonce + client fingerprint) ---
+    # Attest can start immediately (only needs challenge nonce)
     private_key, public_key_jwk = _generate_ec_keypair()
     signature = _sign_nonce(private_key, nonce)
     client_fp = _generate_client_fingerprint()
@@ -463,7 +464,7 @@ async def _do_legacy_flow(session: aiohttp.ClientSession, host: str, media_id: s
             f'&h_user-agent={user_agent}&h_referer={ref}'
             f'&h_origin={ref.rstrip("/")}&h_content-type=application/json'
         )
-        async with session.post(forward_url, json=form_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
+        async with session.post(forward_url, json=form_data, timeout=aiohttp.ClientTimeout(total=3)) as response:
             response.raise_for_status()
             return await response.json()
     else:
@@ -472,7 +473,7 @@ async def _do_legacy_flow(session: aiohttp.ClientSession, host: str, media_id: s
             "Referer": ref,
             "Origin": ref.rstrip('/'),
         }
-        async with session.post(api_url, headers=legacy_headers, json=form_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
+        async with session.post(api_url, headers=legacy_headers, json=form_data, timeout=aiohttp.ClientTimeout(total=3)) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -527,48 +528,49 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
 
         # Resolve actual API host by following embed page redirect
         # Many byse domains (e.g. bysesukior.com) redirect /e/{id} to a different host
+        # Skip for byse domains — they don't redirect
         resolved_host = host
-        try:
-            check_url = f"https://{host}/e/{media_id}"
-            if PROXIFY_STREAMS:
-                # Use proxy for redirect check too (same IP must be used)
-                proxied_check = (
-                    f'{STREAM_PROXY_URL}/proxy/stream?d={check_url}'
-                    f'&api_password={STREAM_PROXY_PASSWORD}'
-                    f'&h_user-agent={get_random_agent()}'
-                )
-                async with session.get(
-                    proxied_check,
-                    allow_redirects=False,
-                    timeout=aiohttp.ClientTimeout(total=5)
-                ) as resp:
-                    if resp.status in (301, 302, 303, 307, 308):
-                        location = resp.headers.get("Location", "")
-                        if location:
-                            resolved = urlparse(location)
-                            if resolved.netloc:
-                                resolved_host = resolved.netloc
-                                redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
-                                if redirect_match:
-                                    media_id = redirect_match.group(1)
-            else:
-                async with session.get(
-                    check_url,
-                    headers={"User-Agent": get_random_agent()},
-                    allow_redirects=False,
-                    timeout=aiohttp.ClientTimeout(total=5)
-                ) as resp:
-                    if resp.status in (301, 302, 303, 307, 308):
-                        location = resp.headers.get("Location", "")
-                        if location:
-                            resolved = urlparse(location)
-                            if resolved.netloc:
-                                resolved_host = resolved.netloc
-                                redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
-                                if redirect_match:
-                                    media_id = redirect_match.group(1)
-        except Exception:
-            pass  # Keep original host on failure
+        if 'byse' not in host:
+            try:
+                check_url = f"https://{host}/e/{media_id}"
+                if PROXIFY_STREAMS:
+                    proxied_check = (
+                        f'{STREAM_PROXY_URL}/proxy/stream?d={check_url}'
+                        f'&api_password={STREAM_PROXY_PASSWORD}'
+                        f'&h_user-agent={get_random_agent()}'
+                    )
+                    async with session.get(
+                        proxied_check,
+                        allow_redirects=False,
+                        timeout=aiohttp.ClientTimeout(total=3)
+                    ) as resp:
+                        if resp.status in (301, 302, 303, 307, 308):
+                            location = resp.headers.get("Location", "")
+                            if location:
+                                resolved = urlparse(location)
+                                if resolved.netloc:
+                                    resolved_host = resolved.netloc
+                                    redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
+                                    if redirect_match:
+                                        media_id = redirect_match.group(1)
+                else:
+                    async with session.get(
+                        check_url,
+                        headers={"User-Agent": get_random_agent()},
+                        allow_redirects=False,
+                        timeout=aiohttp.ClientTimeout(total=3)
+                    ) as resp:
+                        if resp.status in (301, 302, 303, 307, 308):
+                            location = resp.headers.get("Location", "")
+                            if location:
+                                resolved = urlparse(location)
+                                if resolved.netloc:
+                                    resolved_host = resolved.netloc
+                                    redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
+                                    if redirect_match:
+                                        media_id = redirect_match.group(1)
+            except Exception:
+                pass  # Keep original host on failure
 
         host = resolved_host
         ref = f"https://{host}/"
@@ -579,17 +581,23 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         }
 
         # Try legacy flow first, fall back to new challenge flow on 428
+        # Skip legacy for byse domains (always require challenge flow)
         data = None
-        try:
-            data = await _do_legacy_flow(session, host, media_id, headers)
-        except aiohttp.ClientResponseError as e:
-            if e.status == 428:
-                # New challenge flow required
-                # X-Embed-Parent uses /e/ path format
-                embed_url = f"https://{host}/e/{media_id}"
-                data = await _do_challenge_flow(session, host, media_id, headers, embed_url, translator)
-            else:
-                raise
+        is_byse = 'byse' in host
+        if not is_byse:
+            try:
+                data = await _do_legacy_flow(session, host, media_id, headers)
+            except aiohttp.ClientResponseError as e:
+                if e.status == 428:
+                    is_byse = True  # Needs challenge flow
+                else:
+                    raise
+            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+                is_byse = True  # Timed out on legacy, try challenge
+        
+        if not data and is_byse:
+            embed_url = f"https://{host}/e/{media_id}"
+            data = await _do_challenge_flow(session, host, media_id, headers, embed_url, translator)
 
         if not data:
             print("Filemoon Player Error: Empty response")
