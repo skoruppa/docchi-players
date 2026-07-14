@@ -44,10 +44,11 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
     headers = {"User-Agent": user_agent}
     rumble_url = None
     _last_step = "init"
+    _timeout = aiohttp.ClientTimeout(total=5)
     
     try:
         _last_step = f"GET {url}"
-        async with session.get(url, headers=headers, ssl=False) as response:
+        async with session.get(url, headers=headers, ssl=False, timeout=_timeout) as response:
             response.raise_for_status()
             html = await response.text()
 
@@ -100,7 +101,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         # Get encoded video link
         video_link_url = f"https://www.lycoris.cafe/api/watch/getVideoLink?id={episode_id}"
         _last_step = f"GET {video_link_url}"
-        async with session.get(video_link_url, headers={"User-Agent": _compat_ua}) as link_response:
+        async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=_timeout) as link_response:
             link_response.raise_for_status()
             encrypted_text = await link_response.text()
 
@@ -115,7 +116,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         payload = {"encoded": base64_encoded_data}
 
         _last_step = f"POST {decrypt_url}"
-        async with session.post(decrypt_url, headers=decrypt_headers, json=payload) as decrypt_response:
+        async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=_timeout) as decrypt_response:
             decrypt_response.raise_for_status()
             video_sources = await decrypt_response.json()
 
