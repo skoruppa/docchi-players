@@ -300,8 +300,37 @@ async def process_stream_url(session: aiohttp.ClientSession, stream_url: str, he
 
 # --- New challenge flow (June 2025+) ---
 
+async def _proxy_get(session: aiohttp.ClientSession, url: str, headers: dict,
+                     extra_headers: dict = None, timeout: int = 5):
+    """GET request through proxy (if PROXIFY_STREAMS) or directly."""
+    if PROXIFY_STREAMS:
+        user_agent = headers.get("User-Agent", "")
+        referer = headers.get("Referer", "")
+
+        forward_url = (
+            f'{STREAM_PROXY_URL}/proxy/stream?d={url}'
+            f'&api_password={STREAM_PROXY_PASSWORD}'
+            f'&h_user-agent={user_agent}'
+            f'&h_referer={referer}'
+        )
+        if extra_headers:
+            for k, v in extra_headers.items():
+                forward_url += f'&h_{k.lower()}={v}'
+
+        async with session.get(forward_url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+    else:
+        all_headers = dict(headers)
+        if extra_headers:
+            all_headers.update(extra_headers)
+        async with session.get(url, headers=all_headers, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, json_data: dict = None,
-                      extra_headers: dict = None, timeout: int = 4):
+                      extra_headers: dict = None, timeout: int = 5):
     """POST request through proxy (if PROXIFY_STREAMS) or directly."""
     if PROXIFY_STREAMS:
         # Build proxy forward URL with headers as params
@@ -334,16 +363,15 @@ async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, j
             return await resp.json()
 
 
-async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str, translator: str = ''):
+async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str, translator: str = '', embed_prefix: str = 'embed/'):
     """
     Perform the full challenge flow:
-    1. /api/videos/access/challenge  \
-    2. /api/videos/access/attest      } These don't need media_id
-    3. /api/videos/{id}/embed/captcha (PoW)
-    4. /api/videos/{id}/embed/captcha/verify
-    5. /api/videos/{id}/embed/playback (with X-Captcha-Token)
+    1. /api/videos/access/challenge
+    2. /api/videos/access/attest
+    3. /api/videos/{id}/{embed_prefix}captcha (PoW)
+    4. /api/videos/{id}/{embed_prefix}captcha/verify
+    5. /api/videos/{id}/{embed_prefix}playback (with X-Captcha-Token)
     """
-    import asyncio as _asyncio
     base = f"https://{host}"
     user_agent = headers["User-Agent"]
 
@@ -351,8 +379,6 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     translator_lower = translator.lower().strip() if translator else ''
     embed_origin_domain = TRANSLATOR_EMBED_ORIGINS.get(translator_lower, 'docchi.pl')
 
-    # Referer must point to the embed page path
-    parsed_embed = urlparse(embed_url)
     page_referer = f'https://{embed_origin_domain}/'
 
     # Base headers for all API requests in this flow
@@ -363,14 +389,21 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
         "Origin": base,
     }
 
-    # --- Step 1 + 2: Challenge + Attest (done together, no media_id needed) ---
+    # Extra headers for embed endpoints
+    embed_extra = {
+        "X-Embed-Origin": embed_origin_domain,
+        "X-Embed-Referer": f"https://{embed_origin_domain}/",
+        "X-Embed-Parent": embed_url,
+    }
+
+    # --- Step 1: Challenge ---
     challenge_url = f"{base}/api/videos/access/challenge"
-    challenge_data = await _proxy_post(session, challenge_url, api_headers)
+    challenge_data = await _proxy_post(session, challenge_url, api_headers, json_data={})
 
     challenge_id = challenge_data["challenge_id"]
     nonce = challenge_data["nonce"]
 
-    # Attest can start immediately (only needs challenge nonce)
+    # --- Step 2: Attest ---
     private_key, public_key_jwk = _generate_ec_keypair()
     signature = _sign_nonce(private_key, nonce)
     client_fp = _generate_client_fingerprint()
@@ -389,7 +422,7 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
         "attributes": {"entropy": "low"}
     }
 
-    attest_data = await _proxy_post(session, attest_url, api_headers, attest_payload)
+    attest_data = await _proxy_post(session, attest_url, api_headers, attest_payload, timeout=12)
 
     token = attest_data["token"]
     viewer_id = attest_data["viewer_id"]
@@ -403,17 +436,11 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
             "byse_device_id": device_id,
         }, response_url=yarl.URL(base))
 
-    # --- Step 3: Captcha (get PoW challenge) ---
-    captcha_url = f"{base}/api/videos/{media_id}/embed/captcha"
-    fp_payload = _build_fingerprint_payload(token, viewer_id, device_id, confidence)
+    embed_extra["Cookie"] = f"byse_viewer_id={viewer_id}; byse_device_id={device_id}"
 
-    # Extra headers for embed endpoints
-    embed_extra = {
-        "X-Embed-Origin": embed_origin_domain,
-        "X-Embed-Referer": f"https://{embed_origin_domain}/",
-        "X-Embed-Parent": embed_url,
-        "Cookie": f"byse_viewer_id={viewer_id}; byse_device_id={device_id}",
-    }
+    # --- Step 3: Captcha (get PoW challenge) ---
+    captcha_url = f"{base}/api/videos/{media_id}/{embed_prefix}captcha"
+    fp_payload = _build_fingerprint_payload(token, viewer_id, device_id, confidence)
 
     captcha_data = await _proxy_post(session, captcha_url, api_headers, fp_payload, embed_extra)
 
@@ -424,7 +451,7 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     # --- Step 4: Solve PoW and verify ---
     solution = _solve_pow(pow_nonce, pow_difficulty)
 
-    verify_url = f"{base}/api/videos/{media_id}/embed/captcha/verify"
+    verify_url = f"{base}/api/videos/{media_id}/{embed_prefix}captcha/verify"
     verify_payload = {
         "pow_token": pow_token,
         "solution": solution,
@@ -439,43 +466,13 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     captcha_token = verify_data["token"]
 
     # --- Step 5: Get playback with captcha token ---
-    playback_url = f"{base}/api/videos/{media_id}/embed/playback"
+    playback_url = f"{base}/api/videos/{media_id}/{embed_prefix}playback"
     playback_extra = dict(embed_extra)
     playback_extra["X-Captcha-Token"] = captcha_token
 
     data = await _proxy_post(session, playback_url, api_headers, fp_payload, playback_extra)
 
     return data
-
-
-# --- Legacy flow (direct /playback) ---
-
-async def _do_legacy_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict):
-    """Legacy flow: POST directly to /api/videos/{id}/playback with fingerprint."""
-    api_url = f"https://{host}/api/videos/{media_id}/playback"
-    form_data = _build_legacy_fingerprint()
-    ref = f"https://{host}/"
-
-    if PROXIFY_STREAMS:
-        user_agent = headers['User-Agent']
-        forward_url = (
-            f'{STREAM_PROXY_URL}/proxy/forward?d={api_url}'
-            f'&api_password={STREAM_PROXY_PASSWORD}'
-            f'&h_user-agent={user_agent}&h_referer={ref}'
-            f'&h_origin={ref.rstrip("/")}&h_content-type=application/json'
-        )
-        async with session.post(forward_url, json=form_data, timeout=aiohttp.ClientTimeout(total=3)) as response:
-            response.raise_for_status()
-            return await response.json()
-    else:
-        legacy_headers = {
-            "User-Agent": headers["User-Agent"],
-            "Referer": ref,
-            "Origin": ref.rstrip('/'),
-        }
-        async with session.post(api_url, headers=legacy_headers, json=form_data, timeout=aiohttp.ClientTimeout(total=3)) as response:
-            response.raise_for_status()
-            return await response.json()
 
 
 def _build_legacy_fingerprint():
@@ -504,7 +501,7 @@ def _build_legacy_fingerprint():
 async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False, translator: str = ''):
     """
     Extract video URL from Filemoon/Byse player.
-    Supports both legacy flow and new challenge flow (June 2025+).
+    Flow: /details → /settings → (challenge flow if captcha_required, else simple playback)
     """
     if not is_vip and not Config.FORCE_VIP_PLAYERS:
         return None, None, None
@@ -526,78 +523,54 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         if host in REDIRECT_DOMAINS or host == 'filemoon.to':
             host = 'streamlyplayer.online'
 
-        # Resolve actual API host by following embed page redirect
-        # Many byse domains (e.g. bysesukior.com) redirect /e/{id} to a different host
-        # Skip for byse domains — they don't redirect
-        resolved_host = host
-        if 'byse' not in host:
-            try:
-                check_url = f"https://{host}/e/{media_id}"
-                if PROXIFY_STREAMS:
-                    proxied_check = (
-                        f'{STREAM_PROXY_URL}/proxy/stream?d={check_url}'
-                        f'&api_password={STREAM_PROXY_PASSWORD}'
-                        f'&h_user-agent={get_random_agent()}'
-                    )
-                    async with session.get(
-                        proxied_check,
-                        allow_redirects=False,
-                        timeout=aiohttp.ClientTimeout(total=3)
-                    ) as resp:
-                        if resp.status in (301, 302, 303, 307, 308):
-                            location = resp.headers.get("Location", "")
-                            if location:
-                                resolved = urlparse(location)
-                                if resolved.netloc:
-                                    resolved_host = resolved.netloc
-                                    redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
-                                    if redirect_match:
-                                        media_id = redirect_match.group(1)
-                else:
-                    async with session.get(
-                        check_url,
-                        headers={"User-Agent": get_random_agent()},
-                        allow_redirects=False,
-                        timeout=aiohttp.ClientTimeout(total=3)
-                    ) as resp:
-                        if resp.status in (301, 302, 303, 307, 308):
-                            location = resp.headers.get("Location", "")
-                            if location:
-                                resolved = urlparse(location)
-                                if resolved.netloc:
-                                    resolved_host = resolved.netloc
-                                    redirect_match = re.search(r'/(?:e|eyi|d|download|j\d+)/([0-9a-zA-Z]+)', resolved.path)
-                                    if redirect_match:
-                                        media_id = redirect_match.group(1)
-            except Exception:
-                pass  # Keep original host on failure
-
-        host = resolved_host
         ref = f"https://{host}/"
         headers = {
             "User-Agent": get_random_agent(),
-            "Referer": url,  # Referer = the embed page URL
-            "Origin": f"https://{host}"
+            "Referer": ref,
+            "Origin": ref.rstrip('/')
         }
 
-        # Try legacy flow first, fall back to new challenge flow on 428
-        # Skip legacy for byse domains (always require challenge flow)
+        # Step 1: Get /details to find embed_frame_url (resolves host without redirect check)
+        embed_prefix = ''
+        details_url = f"https://{host}/api/videos/{media_id}/details"
+        try:
+            details = await _proxy_get(session, details_url, headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 404:
+                # Try with embed/ prefix
+                embed_prefix = 'embed/'
+                details_url = f"https://{host}/api/videos/{media_id}/{embed_prefix}details"
+                details = await _proxy_get(session, details_url, headers)
+            else:
+                raise
+
+        # If embed_frame_url exists, use that host for subsequent requests
+        embed_frame_url = details.get('embed_frame_url')
+        if embed_frame_url:
+            embed_parsed = urlparse(embed_frame_url)
+            if embed_parsed.netloc:
+                host = embed_parsed.netloc
+                ref = f"https://{host}/"
+                headers.update({
+                    "Referer": ref,
+                    "Origin": ref.rstrip('/'),
+                    "X-Embed-Parent": f"https://{parsed.netloc}/e/{media_id}",
+                })
+
+        # Step 2: Get /settings to check if captcha is required
+        settings_url = f"https://{host}/api/videos/{media_id}/{embed_prefix}settings"
+        settings = await _proxy_get(session, settings_url, headers)
+
+        # Step 3: Either challenge flow or simple playback
         data = None
-        is_byse = 'byse' in host
-        if not is_byse:
-            try:
-                data = await _do_legacy_flow(session, host, media_id, headers)
-            except aiohttp.ClientResponseError as e:
-                if e.status == 428:
-                    is_byse = True  # Needs challenge flow
-                else:
-                    raise
-            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
-                is_byse = True  # Timed out on legacy, try challenge
-        
-        if not data and is_byse:
+        if settings.get('captcha_required'):
+            # Full challenge flow (slow: ~8-10s due to attest)
             embed_url = f"https://{host}/e/{media_id}"
-            data = await _do_challenge_flow(session, host, media_id, headers, embed_url, translator)
+            data = await _do_challenge_flow(session, host, media_id, headers, embed_url, translator, embed_prefix)
+        else:
+            # Simple playback without captcha (fast: ~1s)
+            playback_url = f"https://{host}/api/videos/{media_id}/{embed_prefix}playback"
+            data = await _proxy_post(session, playback_url, headers, _build_legacy_fingerprint())
 
         if not data:
             print("Filemoon Player Error: Empty response")
@@ -640,7 +613,7 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         return None, None, None
 
     except Exception as e:
-        print(f"Filemoon Player Error: {e}")
+        print(f"Filemoon Player Error: {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 
