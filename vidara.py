@@ -4,7 +4,7 @@ from urllib.parse import urljoin, urlparse
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 
 # Domains handled by this player
-DOMAINS = ['vidara.so', 'vidara.to', 'vidaraa.cc', 'vidavaca.cc', 'streamix.so', 'stmix.io']
+DOMAINS = ['vidara.so', 'vidara.to', 'vidaraa.cc', 'vidavaca.cc', 'thebesthosterv.com', 'streamix.so', 'stmix.io']
 NAMES = ['vidara', 'vidavaca', 'streamix']
 
 ENABLED = True
