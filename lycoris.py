@@ -98,12 +98,20 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
             logging.error("Lycoris Player Error: Episode ID not found.")
             return None, None, None
 
-        # Get encoded video link
+        # Get encoded video link (retry once on timeout)
         video_link_url = f"https://www.lycoris.cafe/api/watch/getVideoLink?id={episode_id}"
         _last_step = f"GET {video_link_url}"
-        async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=_timeout) as link_response:
-            link_response.raise_for_status()
-            encrypted_text = await link_response.text()
+        encrypted_text = None
+        for _attempt in range(2):
+            try:
+                async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=3)) as link_response:
+                    link_response.raise_for_status()
+                    encrypted_text = await link_response.text()
+                    break
+            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+                if _attempt == 0:
+                    continue  # retry once
+                raise
 
         base64_encoded_data = base64.b64encode(encrypted_text.encode('latin-1')).decode('utf-8')
 
@@ -116,9 +124,19 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         payload = {"encoded": base64_encoded_data}
 
         _last_step = f"POST {decrypt_url}"
-        async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=_timeout) as decrypt_response:
-            decrypt_response.raise_for_status()
-            video_sources = await decrypt_response.json()
+        decrypt_response_data = None
+        for _attempt in range(2):
+            try:
+                async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=aiohttp.ClientTimeout(total=3)) as decrypt_response:
+                    decrypt_response.raise_for_status()
+                    decrypt_response_data = await decrypt_response.json()
+                    break
+            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+                if _attempt == 0:
+                    continue
+                raise
+
+        video_sources = decrypt_response_data
 
         highest_quality = None
         if video_sources.get('FHD'):
