@@ -23,14 +23,14 @@ async def check_url_status(session, url):
     if PROXIFY_STREAMS:
         url = f'{STREAM_PROXY_URL}/proxy/stream?d={url}&api_password={STREAM_PROXY_PASSWORD}'
     try:
-        async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+        async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=3)) as resp:
             if resp.status not in (405, 501):
                 return resp.status
     except Exception:
         pass
 
     try:
-        async with session.get(url, headers={"Range": "bytes=0-0"}, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+        async with session.get(url, headers={"Range": "bytes=0-0"}, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=3)) as resp:
             return resp.status
     except Exception:
         return None
