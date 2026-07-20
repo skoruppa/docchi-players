@@ -3,12 +3,17 @@ import logging
 import aiohttp
 from urllib.parse import urljoin, urlparse
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
+from config import Config
 
 # Domains handled by this player
 DOMAINS = ['vidara.so', 'vidara.to', 'vidaraa.cc', 'vidavaca.cc', 'thebesthosterv.com', 'vidchampions.com', 'streamix.so', 'stmix.io']
 NAMES = ['vidara', 'vidavaca', 'streamix']
 
 ENABLED = True
+
+PROXIFY_STREAMS = Config.PROXIFY_STREAMS
+STREAM_PROXY_URL = Config.STREAM_PROXY_URL
+STREAM_PROXY_PASSWORD = Config.STREAM_PROXY_PASSWORD
 
 
 async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False):
@@ -30,8 +35,9 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
         else:
             api_url = f"https://{host}/api/stream"
 
+        user_agent = get_random_agent()
         headers = {
-            "User-Agent": get_random_agent(),
+            "User-Agent": user_agent,
             "Referer": url,
             "Origin": ref.rstrip('/'),
             "Content-Type": "application/json"
@@ -39,23 +45,45 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
 
         payload = {"filecode": media_id, "device": "web"}
 
-        async with session.post(api_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
-            response.raise_for_status()
-            data = await response.json()
+        # Route extraction request through proxy if available
+        if PROXIFY_STREAMS:
+            proxy_url = (
+                f'{STREAM_PROXY_URL}/proxy/forward?d={api_url}'
+                f'&api_password={STREAM_PROXY_PASSWORD}'
+                f'&h_user-agent={user_agent}'
+                f'&h_referer={url}'
+                f'&h_origin={ref.rstrip("/")}'
+                f'&h_content-type=application/json'
+            )
+            async with session.post(proxy_url, json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=5)) as response:
+                response.raise_for_status()
+                data = await response.json()
+        else:
+            async with session.post(api_url, json=payload, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=5)) as response:
+                response.raise_for_status()
+                data = await response.json()
 
         streaming_url = data.get('streaming_url')
         if not streaming_url:
             logging.warning("[Vidara] No streaming_url in response")
             return None, None, None
 
-        del headers['Content-Type']
+        # Stream headers for playback (direct, no proxy)
+        stream_headers = {
+            'request': {
+                "User-Agent": user_agent,
+                "Referer": url,
+                "Origin": ref.rstrip('/')
+            }
+        }
 
         try:
-            quality = await fetch_resolution_from_m3u8(session, streaming_url, headers) or "unknown"
+            quality = await fetch_resolution_from_m3u8(session, streaming_url, stream_headers['request']) or "unknown"
         except Exception:
             quality = "unknown"
 
-        stream_headers = {'request': headers}
         return streaming_url, quality, stream_headers
 
     except Exception as e:
