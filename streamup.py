@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import re
+import logging
 import aiohttp
 import json
 from urllib.parse import urlparse
@@ -90,14 +91,18 @@ async def get_video_from_streamup_player(session: aiohttp.ClientSession, player_
                     s_response.raise_for_status()
                     response = await s_response.text()
                 if not response or not response.strip():
-                    print(f"StreamUP Player Error: Empty response from {s_url}")
+                    logging.warning(f"StreamUP Player Error: Empty response from {s_url}")
                     return None, None, None
-                stream_info = json.loads(response)
+                try:
+                    stream_info = json.loads(response)
+                except json.JSONDecodeError:
+                    logging.warning(f"StreamUP Player Error: Invalid JSON from {s_url}: {response[:100]}")
+                    return None, None, None
 
             stream_url = stream_info.get("streaming_url")
 
         if not stream_url:
-            print("Error StreamUP: 'streaming_url' not found.")
+            logging.warning("StreamUP Player Error: 'streaming_url' not found.")
             return None, None, None
 
         stream_headers_dict = {
@@ -114,13 +119,13 @@ async def get_video_from_streamup_player(session: aiohttp.ClientSession, player_
         return stream_url, quality, stream_headers
 
     except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
-        print(f"StreamUP Player Error: Timeout connecting to {player_url}")
+        logging.warning(f"StreamUP Player Error: Timeout connecting to {player_url}")
         return None, None, None
     except aiohttp.ClientError as e:
-        print(f"StreamUP Player Error: {type(e).__name__}: {e}")
+        logging.warning(f"StreamUP Player Error: {type(e).__name__}: {e}")
         return None, None, None
     except Exception as e:
-        print(f"StreamUP Player Error: {type(e).__name__}: {e}")
+        logging.warning(f"StreamUP Player Error: {type(e).__name__}: {e}")
         return None, None, None
 
 
