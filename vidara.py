@@ -80,7 +80,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
         }
 
         try:
-            quality = await fetch_resolution_from_m3u8(session, streaming_url, stream_headers['request']) or "unknown"
+            quality = await fetch_resolution_from_m3u8(session, streaming_url, stream_headers['request'], use_proxy=PROXIFY_STREAMS) or "unknown"
         except Exception:
             quality = "unknown"
 
