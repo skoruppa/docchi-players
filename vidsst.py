@@ -39,7 +39,7 @@ async def get_video_from_vidsst_player(session: aiohttp.ClientSession, url: str,
         return stream_url, quality, None
 
     except Exception as e:
-        logging.warning(f"[Vids.st] {e}")
+        logging.warning(f"[Vids.st] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

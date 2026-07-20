@@ -99,7 +99,7 @@ async def get_video_from_dood_player(session: aiohttp.ClientSession, player_url:
         return final_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"[Dood] {e}")
+        logging.warning(f"[Dood] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

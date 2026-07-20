@@ -76,7 +76,7 @@ async def get_video_from_vidoza_player(session: aiohttp.ClientSession, player_ur
         return best_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"[Vidoza] {e}")
+        logging.warning(f"[Vidoza] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

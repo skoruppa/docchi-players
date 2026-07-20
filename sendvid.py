@@ -52,7 +52,7 @@ async def get_video_from_sendvid_player(session: aiohttp.ClientSession, player_u
         return final_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"[SendVid] {e}")
+        logging.warning(f"[SendVid] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

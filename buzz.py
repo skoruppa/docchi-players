@@ -55,7 +55,7 @@ async def get_video_from_buzz_player(session: aiohttp.ClientSession, player_url:
         return stream_url, quality, stream_headers
         
     except Exception as e:
-        logging.warning(f"[Buzz] {e}")
+        logging.warning(f"[Buzz] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

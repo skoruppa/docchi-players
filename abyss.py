@@ -299,7 +299,7 @@ async def get_video_from_abyss_player(session: aiohttp.ClientSession, url: str, 
         return None, None, None
 
     except Exception as e:
-        logging.warning(f"[Abyss] {e}")
+        logging.warning(f"[Abyss] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

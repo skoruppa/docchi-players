@@ -133,7 +133,7 @@ async def get_video_from_veev_player(session: aiohttp.ClientSession, player_url:
         return None, None, None
 
     except Exception as e:
-        logging.warning(f"[Veev] {e}")
+        logging.warning(f"[Veev] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

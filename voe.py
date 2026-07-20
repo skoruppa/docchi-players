@@ -159,7 +159,7 @@ async def get_video_from_voe_player(session: aiohttp.ClientSession, player_url: 
         return None, None, None
         
     except Exception as e:
-        logging.warning(f"[VOE] {e}")
+        logging.warning(f"[VOE] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

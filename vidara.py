@@ -59,7 +59,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
         return streaming_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"[Vidara] {e}")
+        logging.warning(f"[Vidara] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

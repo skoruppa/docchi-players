@@ -54,7 +54,7 @@ async def get_video_from_abstream_player(session: aiohttp.ClientSession, player_
         return final_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"[AbStream] {e}")
+        logging.warning(f"[AbStream] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 
