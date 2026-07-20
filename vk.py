@@ -3,7 +3,6 @@ import json
 import hashlib
 import aiohttp
 from app.utils.common_utils import get_random_agent
-from flask import request
 
 # Domains handled by this player
 DOMAINS = ['vk.com', 'vkvideo.ru']
@@ -244,13 +243,7 @@ def extract_video_alternative_method(html_content):
 
 
 async def get_video_from_vk_player(session: aiohttp.ClientSession, url, is_vip: bool = False):
-    try:
-        user_agent = request.headers.get('User-Agent', None)
-    except:
-        user_agent = None
-
-    if not user_agent:
-        user_agent = get_random_agent("firefox")
+    user_agent = get_random_agent("firefox")
 
     request_headers = {
         "User-Agent": user_agent,

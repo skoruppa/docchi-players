@@ -4,7 +4,6 @@ import aiohttp
 from bs4 import BeautifulSoup
 from app.utils.common_utils import get_random_agent
 import json
-from flask import request
 from config import Config
 
 # Domains handled by this player
@@ -44,13 +43,7 @@ def process_video_json(video_json):
 
 
 async def get_video_from_okru_player(session: aiohttp.ClientSession, url, is_vip: bool = False):
-    try:
-        user_agent = request.headers.get('User-Agent', None)
-    except:
-        user_agent = None
-
-    if not user_agent:
-        user_agent = get_random_agent("firefox")
+    user_agent = get_random_agent("firefox")
     headers = {"User-Agent": user_agent}
     video_headers = {
             "request": {
