@@ -189,6 +189,9 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
                 status = await check_url_status(session, url_candidate)
                 if status in (200, 206):
                     return url_candidate, quality, None
+            logging.warning(f"[Lycoris] All URL candidates failed status check (last status: {status})")
+        else:
+            logging.warning("[Lycoris] No video sources in decrypt response")
 
         # Fallback to Rumble if primary sources fail
         if rumble_url:
