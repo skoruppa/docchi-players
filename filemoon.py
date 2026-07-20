@@ -103,7 +103,7 @@ def _sign_nonce(private_key, nonce: str) -> str:
     return _b64urlencode(signature)
 
 
-def _solve_pow(nonce: str, difficulty: int, max_iterations: int = 200000) -> str:
+def _solve_pow(nonce: str, difficulty: int, max_iterations: int = 500000) -> str:
     """
     Solve Byse Proof-of-Work challenge using native C solver.
     The hash is a custom memory-hard function (NOT standard SHA-256).
@@ -111,17 +111,10 @@ def _solve_pow(nonce: str, difficulty: int, max_iterations: int = 200000) -> str
     """
     import time as _t
     start = _t.time()
-    try:
-        result = _solve_pow_native(nonce, difficulty, max_iterations)
-        elapsed = (_t.time() - start) * 1000
-        print(f"Filemoon PoW solved (native): solution={result}, difficulty={difficulty}, time={elapsed:.0f}ms")
-        return result
-    except Exception as e:
-        print(f"Filemoon PoW native solver unavailable ({e}), using Python fallback")
-        result = _solve_pow_python(nonce, difficulty, max_iterations)
-        elapsed = (_t.time() - start) * 1000
-        print(f"Filemoon PoW solved (python): solution={result}, difficulty={difficulty}, time={elapsed:.0f}ms")
-        return result
+    result = _solve_pow_native(nonce, difficulty, max_iterations)
+    elapsed = (_t.time() - start) * 1000
+    print(f"Filemoon PoW solved (native): solution={result}, difficulty={difficulty}, time={elapsed:.0f}ms")
+    return result
 
 
 def _solve_pow_native(nonce: str, difficulty: int, max_iterations: int) -> str:
