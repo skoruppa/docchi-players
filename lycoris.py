@@ -104,13 +104,13 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         encrypted_text = None
 
         async def _fetch_direct():
-            async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+            async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 resp.raise_for_status()
                 return await resp.text()
 
         async def _fetch_proxy():
             proxied = f'{STREAM_PROXY_URL}/proxy/stream?d={video_link_url}&api_password={STREAM_PROXY_PASSWORD}&h_user-agent={_compat_ua}'
-            async with session.get(proxied, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+            async with session.get(proxied, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 resp.raise_for_status()
                 return await resp.text()
 
@@ -165,7 +165,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         decrypt_response_data = None
         for _attempt in range(2):
             try:
-                async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=aiohttp.ClientTimeout(total=3)) as decrypt_response:
+                async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as decrypt_response:
                     decrypt_response.raise_for_status()
                     decrypt_response_data = await decrypt_response.json()
                     break
