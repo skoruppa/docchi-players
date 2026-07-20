@@ -357,11 +357,50 @@ async def _proxy_post(session: aiohttp.ClientSession, url: str, headers: dict, j
             return await resp.json()
 
 
+# --- Attest cache (reuse challenge+attest across multiple videos on same host) ---
+import time as _time_module
+
+# host -> {token, viewer_id, device_id, confidence, user_agent, timestamp}
+_attest_cache: dict[str, dict] = {}
+_ATTEST_CACHE_TTL = 600  # 10 minutes
+
+
+def _get_cached_attest(host: str, user_agent: str) -> dict | None:
+    """Get cached attest credentials for a host if still valid."""
+    cached = _attest_cache.get(host)
+    if not cached:
+        return None
+    if _time_module.time() - cached['timestamp'] > _ATTEST_CACHE_TTL:
+        del _attest_cache[host]
+        return None
+    # Must be same user_agent (fingerprint is tied to it)
+    if cached['user_agent'] != user_agent:
+        return None
+    return cached
+
+
+def _set_cached_attest(host: str, user_agent: str, token: str, viewer_id: str, device_id: str, confidence: float):
+    """Cache attest credentials for a host."""
+    _attest_cache[host] = {
+        'token': token,
+        'viewer_id': viewer_id,
+        'device_id': device_id,
+        'confidence': confidence,
+        'user_agent': user_agent,
+        'timestamp': _time_module.time(),
+    }
+
+
+def _invalidate_attest(host: str):
+    """Invalidate cached attest on auth failure."""
+    _attest_cache.pop(host, None)
+
+
 async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id: str, headers: dict, embed_url: str, translator: str = '', embed_prefix: str = 'embed/'):
     """
     Perform the full challenge flow:
-    1. /api/videos/access/challenge
-    2. /api/videos/access/attest
+    1. /api/videos/access/challenge  (skipped if cached)
+    2. /api/videos/access/attest     (skipped if cached)
     3. /api/videos/{id}/{embed_prefix}captcha (PoW)
     4. /api/videos/{id}/{embed_prefix}captcha/verify
     5. /api/videos/{id}/{embed_prefix}playback (with X-Captcha-Token)
@@ -390,38 +429,50 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
         "X-Embed-Parent": embed_url,
     }
 
-    # --- Step 1: Challenge ---
-    challenge_url = f"{base}/api/videos/access/challenge"
-    challenge_data = await _proxy_post(session, challenge_url, api_headers, json_data={})
+    # Try cached attest credentials first (skips ~3-5s challenge+attest)
+    cached_attest = _get_cached_attest(host, user_agent)
+    if cached_attest:
+        token = cached_attest['token']
+        viewer_id = cached_attest['viewer_id']
+        device_id = cached_attest['device_id']
+        confidence = cached_attest['confidence']
+        logging.debug(f"[Filemoon] Reusing cached attest for {host}")
+    else:
+        # --- Step 1: Challenge ---
+        challenge_url = f"{base}/api/videos/access/challenge"
+        challenge_data = await _proxy_post(session, challenge_url, api_headers, json_data={})
 
-    challenge_id = challenge_data["challenge_id"]
-    nonce = challenge_data["nonce"]
+        challenge_id = challenge_data["challenge_id"]
+        nonce = challenge_data["nonce"]
 
-    # --- Step 2: Attest ---
-    private_key, public_key_jwk = _generate_ec_keypair()
-    signature = _sign_nonce(private_key, nonce)
-    client_fp = _generate_client_fingerprint()
-    client_fp["user_agent"] = user_agent
+        # --- Step 2: Attest ---
+        private_key, public_key_jwk = _generate_ec_keypair()
+        signature = _sign_nonce(private_key, nonce)
+        client_fp = _generate_client_fingerprint()
+        client_fp["user_agent"] = user_agent
 
-    attest_url = f"{base}/api/videos/access/attest"
-    attest_payload = {
-        "viewer_id": "",
-        "device_id": "",
-        "challenge_id": challenge_id,
-        "nonce": nonce,
-        "signature": signature,
-        "public_key": public_key_jwk,
-        "client": client_fp,
-        "storage": {},
-        "attributes": {"entropy": "low"}
-    }
+        attest_url = f"{base}/api/videos/access/attest"
+        attest_payload = {
+            "viewer_id": "",
+            "device_id": "",
+            "challenge_id": challenge_id,
+            "nonce": nonce,
+            "signature": signature,
+            "public_key": public_key_jwk,
+            "client": client_fp,
+            "storage": {},
+            "attributes": {"entropy": "low"}
+        }
 
-    attest_data = await _proxy_post(session, attest_url, api_headers, attest_payload, timeout=12)
+        attest_data = await _proxy_post(session, attest_url, api_headers, attest_payload, timeout=12)
 
-    token = attest_data["token"]
-    viewer_id = attest_data["viewer_id"]
-    device_id = attest_data["device_id"]
-    confidence = attest_data["confidence"]
+        token = attest_data["token"]
+        viewer_id = attest_data["viewer_id"]
+        device_id = attest_data["device_id"]
+        confidence = attest_data["confidence"]
+
+        # Cache for subsequent requests
+        _set_cached_attest(host, user_agent, token, viewer_id, device_id, confidence)
 
     # Set cookies for subsequent requests (only needed for non-proxy mode)
     if not PROXIFY_STREAMS:
@@ -436,7 +487,15 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     captcha_url = f"{base}/api/videos/{media_id}/{embed_prefix}captcha"
     fp_payload = _build_fingerprint_payload(token, viewer_id, device_id, confidence)
 
-    captcha_data = await _proxy_post(session, captcha_url, api_headers, fp_payload, embed_extra)
+    try:
+        captcha_data = await _proxy_post(session, captcha_url, api_headers, fp_payload, embed_extra)
+    except aiohttp.ClientResponseError as e:
+        if e.status in (401, 403) and cached_attest:
+            # Cached attest expired server-side, retry with fresh attest
+            logging.info(f"[Filemoon] Cached attest rejected ({e.status}), refreshing...")
+            _invalidate_attest(host)
+            return await _do_challenge_flow(session, host, media_id, headers, embed_url, translator, embed_prefix)
+        raise
 
     pow_nonce = captcha_data["pow_nonce"]
     pow_difficulty = captcha_data["pow_difficulty"]
@@ -455,6 +514,8 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     verify_data = await _proxy_post(session, verify_url, api_headers, verify_payload, embed_extra)
 
     if verify_data.get("status") != "ok":
+        if cached_attest:
+            _invalidate_attest(host)
         raise Exception(f"PoW verification failed: {verify_data}")
 
     captcha_token = verify_data["token"]
