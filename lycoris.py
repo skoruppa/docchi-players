@@ -115,24 +115,27 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
                 return await resp.text()
 
         if PROXIFY_STREAMS:
-            # Race both paths, use whichever responds first
+            # Race both paths, use whichever responds first successfully
             tasks = [asyncio.ensure_future(_fetch_direct()), asyncio.ensure_future(_fetch_proxy())]
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            # Cancel and suppress pending tasks
             for t in pending:
                 t.cancel()
+            # Retrieve exceptions from all tasks to prevent "Task exception was never retrieved"
+            for t in tasks:
+                if t.done() and not t.cancelled():
+                    try:
+                        t.exception()
+                    except Exception:
+                        pass
+            # Use first successful result
             for t in done:
-                if t.exception() is None:
-                    encrypted_text = t.result()
-                    break
-            # If first winner failed, try remaining
-            if not encrypted_text:
-                for t in pending:
-                    t.cancel()
-                # Both failed in race — try one more time sequentially
-                try:
-                    encrypted_text = await _fetch_proxy()
-                except Exception:
-                    pass
+                if not t.cancelled():
+                    try:
+                        encrypted_text = t.result()
+                        break
+                    except Exception:
+                        pass
         else:
             for _attempt in range(2):
                 try:
