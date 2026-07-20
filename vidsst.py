@@ -26,7 +26,7 @@ async def get_video_from_vidsst_player(session: aiohttp.ClientSession, url: str,
         # Extract m3u8 URL from: const url = "https://cdn.vids.st/...master.m3u8";
         match = re.search(r'const\s+url\s*=\s*"([^"]+\.m3u8[^"]*)"', html_content)
         if not match:
-            logging.warning("Vids.st Player Error: No m3u8 URL found")
+            logging.warning("[Vids.st] No m3u8 URL found")
             return None, None, None
 
         stream_url = match.group(1).replace('\\/', '/')
@@ -39,7 +39,7 @@ async def get_video_from_vidsst_player(session: aiohttp.ClientSession, url: str,
         return stream_url, quality, None
 
     except Exception as e:
-        logging.warning(f"Vids.st Player Error: {e}")
+        logging.warning(f"[Vids.st] {e}")
         return None, None, None
 
 

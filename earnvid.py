@@ -66,7 +66,7 @@ async def get_video_from_earnvid_player(session: aiohttp.ClientSession, player_u
         return None, None, None
 
     except Exception as e:
-        logging.warning(f"EarnVid Player Error: {e}")
+        logging.warning(f"[EarnVid] {e}")
         return None, None, None
 
 if __name__ == '__main__':

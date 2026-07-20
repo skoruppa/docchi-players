@@ -45,7 +45,7 @@ async def get_video_from_upn_player(session: aiohttp.ClientSession, player_url: 
 
         video_id_match = re.search(r'#([a-zA-Z0-9]+)', player_url)
         if not video_id_match:
-            logging.warning("UPNS Player Error: wrong ID")
+            logging.warning("[UPN] wrong ID")
             return None, None, None
 
         video_id = video_id_match.group(1)
@@ -63,7 +63,7 @@ async def get_video_from_upn_player(session: aiohttp.ClientSession, player_url: 
             stream_url = source_match.group(1).replace('\\/', '/')
 
         if not stream_url:
-            logging.warning("UPN Player Error: no 'source' found")
+            logging.warning("[UPN] no 'source' found")
             return None, None, None
 
         quality = await fetch_resolution_from_m3u8(session, stream_url, headers)
@@ -75,7 +75,7 @@ async def get_video_from_upn_player(session: aiohttp.ClientSession, player_url: 
         return stream_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"UPN Player Error: Unexpected error: {e}")
+        logging.warning(f"[UPN] Unexpected error: {e}")
         return None, None, None
 
 

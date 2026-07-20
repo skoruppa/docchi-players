@@ -43,7 +43,7 @@ def extract_ua_section(js_string):
         return parsed
 
     except Exception as e:
-        logging.warning(f"Error during processing: {e}")
+        logging.warning(f"[Rumble] Processing error: {e}")
         return None
 
 
@@ -57,7 +57,7 @@ async def get_video_from_rumble_player(session: aiohttp.ClientSession, url, is_v
     if "/embed/" not in url:
         async with session.get(url, headers=headers) as response:
             if response.status != 200:
-                logging.warning(f"Error fetching page {url}: Status {response.status}")
+                logging.warning(f"[Rumble] Fetch error for {url}: status {response.status}")
                 return None, None, None
             page_text = await response.text()
 
@@ -71,21 +71,21 @@ async def get_video_from_rumble_player(session: aiohttp.ClientSession, url, is_v
                     for item in data_array:
                         if item.get('@type') == 'VideoObject' and 'embedUrl' in item:
                             final_url = item['embedUrl']
-                            logging.debug(f"Found embedUrl: {final_url}")
+                            logging.debug(f"[Rumble] Found embedUrl: {final_url}")
                             break
                     else:
-                        logging.warning("No 'embedUrl' found in 'VideoObject' in JSON-LD.")
+                        logging.warning("[Rumble] No 'embedUrl' found in 'VideoObject' in JSON-LD")
                         return None, None, None
                 except json.JSONDecodeError as e:
-                    logging.warning(f"JSON-LD decoding error: {e}")
+                    logging.warning(f"[Rumble] JSON-LD decoding error: {e}")
                     return None, None, None
             else:
-                logging.warning("JSON-LD script not found on the page.")
+                logging.warning("[Rumble] JSON-LD script not found on the page")
                 return None, None, None
 
     async with session.get(final_url, headers=headers) as response:
         if response.status != 200:
-            logging.warning(f"Error fetching final_url {final_url}: Status {response.status}")
+            logging.warning(f"[Rumble] Fetch error for {final_url}: status {response.status}")
             return None, None, None
 
         text = await response.text()
@@ -94,14 +94,14 @@ async def get_video_from_rumble_player(session: aiohttp.ClientSession, url, is_v
     match = json_pattern.search(text)
 
     if not match:
-        logging.warning(f"No matching JSON pattern 'ua' found for URL: {final_url}")
+        logging.warning(f"[Rumble] No matching JSON pattern 'ua' found for URL: {final_url}")
         return None, None, None
 
     json_str = '{' + match.group(0) + '}'
     data = extract_ua_section(json_str)
 
     if data is None:
-        logging.warning(f"Failed to process 'ua' section for URL: {final_url}")
+        logging.warning(f"[Rumble] Failed to process 'ua' section for URL: {final_url}")
         return None, None, None
 
     stream_headers = {
@@ -126,7 +126,7 @@ async def get_video_from_rumble_player(session: aiohttp.ClientSession, url, is_v
         video_data = video_sources['tar']
 
     if not video_data:
-        logging.warning(f"No video data found in sources for URL: {final_url}")
+        logging.warning(f"[Rumble] No video data found in sources for URL: {final_url}")
         return None, None, None
 
     if 'auto' in video_data:

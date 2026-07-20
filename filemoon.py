@@ -506,7 +506,7 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
         match = re.search(pattern, url)
 
         if not match:
-            logging.warning("Filemoon Player Error: Invalid URL format")
+            logging.warning("[Filemoon] Invalid URL format")
             return None, None, None
 
         media_id = match.group(1)
@@ -567,7 +567,7 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
             data = await _proxy_post(session, playback_url, headers, _build_legacy_fingerprint())
 
         if not data:
-            logging.warning("Filemoon Player Error: Empty response")
+            logging.warning("[Filemoon] Empty response")
             return None, None, None
 
         sources = None
@@ -593,7 +593,7 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
                 ct = json.loads(decrypted.decode('latin-1'))
                 sources = ct.get('sources')
             except Exception as e:
-                logging.warning(f"Filemoon Decryption Error: {e}")
+                logging.warning(f"[Filemoon] Decryption error: {e}")
 
         if sources:
             sources_list = [x.get('url') for x in sources if x.get('url')]
@@ -603,11 +603,11 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
                     stream_url = urljoin(f"https://{host}/", stream_url)
                 return await process_stream_url(session, stream_url, headers, url)
 
-        logging.warning("Filemoon Player Error: No video sources found")
+        logging.warning("[Filemoon] No video sources found")
         return None, None, None
 
     except Exception as e:
-        logging.warning(f"Filemoon Player Error: {type(e).__name__}: {e or 'no details'}")
+        logging.warning(f"[Filemoon] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
 
 

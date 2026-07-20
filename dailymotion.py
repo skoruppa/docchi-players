@@ -66,7 +66,7 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
         return None, None, None
     
     except Exception as e:
-        logging.warning(f"Dailymotion Player Error: {e}")
+        logging.warning(f"[Dailymotion] {e}")
         return None, None, None
 
 if __name__ == '__main__':

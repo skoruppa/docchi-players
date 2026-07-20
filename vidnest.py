@@ -30,7 +30,7 @@ async def get_video_from_vidnest_player(session: aiohttp.ClientSession, url: str
         match = re.search(pattern, html_content)
 
         if not match:
-            logging.warning("Vidnest Player Error: No video source found")
+            logging.warning("[Vidnest] No video source found")
             return None, None, None
 
         stream_url = match.group(1)
@@ -47,7 +47,7 @@ async def get_video_from_vidnest_player(session: aiohttp.ClientSession, url: str
         return stream_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"Vidnest Player Error: {e}")
+        logging.warning(f"[Vidnest] {e}")
         return None, None, None
 
 

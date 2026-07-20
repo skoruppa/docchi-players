@@ -39,7 +39,7 @@ async def get_video_from_abstream_player(session: aiohttp.ClientSession, player_
                 match = re.search(r'''(?:file|src)\s*[:=]\s*["']([^"']+\.mp4[^"']*)''', html)
 
         if not match:
-            logging.warning("AbStream Player Error: No video source found")
+            logging.warning("[AbStream] No video source found")
             return None, None, None
 
         final_url = match.group('url') if 'url' in match.groupdict() else match.group(1)
@@ -54,7 +54,7 @@ async def get_video_from_abstream_player(session: aiohttp.ClientSession, player_
         return final_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"AbStream Player Error: {e}")
+        logging.warning(f"[AbStream] {e}")
         return None, None, None
 
 

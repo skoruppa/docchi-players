@@ -295,11 +295,11 @@ async def get_video_from_abyss_player(session: aiohttp.ClientSession, url: str, 
         if source:
             return source, quality, {'request': headers}
 
-        logging.warning("Abyss Player Error: No video source found")
+        logging.warning("[Abyss] No video source found")
         return None, None, None
 
     except Exception as e:
-        logging.warning(f"Abyss Player Error: {e}")
+        logging.warning(f"[Abyss] {e}")
         return None, None, None
 
 

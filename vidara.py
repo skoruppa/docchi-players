@@ -16,7 +16,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
     try:
         match = re.search(r'/(?:e|v)/([0-9a-zA-Z]+)', url)
         if not match:
-            logging.warning("Vidara Player Error: Invalid URL format")
+            logging.warning("[Vidara] Invalid URL format")
             return None, None, None
 
         media_id = match.group(1)
@@ -45,7 +45,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
 
         streaming_url = data.get('streaming_url')
         if not streaming_url:
-            logging.warning("Vidara Player Error: No streaming_url in response")
+            logging.warning("[Vidara] No streaming_url in response")
             return None, None, None
 
         del headers['Content-Type']
@@ -59,7 +59,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
         return streaming_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"Vidara Player Error: {e}")
+        logging.warning(f"[Vidara] {e}")
         return None, None, None
 
 

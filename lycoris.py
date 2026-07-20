@@ -95,7 +95,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
                 continue
 
         if not episode_id:
-            logging.error("Lycoris Player Error: Episode ID not found.")
+            logging.error("[Lycoris] Episode ID not found.")
             return None, None, None
 
         # Get encoded video link (retry once on timeout)
@@ -162,7 +162,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         return None, None, None
 
     except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
-        logging.error(f"Lycoris Player Error: Timeout at: {_last_step}")
+        logging.error(f"[Lycoris] Timeout at: {_last_step}")
         if rumble_url:
             try:
                 return await get_video_from_rumble_player(session, rumble_url)
@@ -170,7 +170,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
                 pass
         return None, None, None
     except Exception as e:
-        logging.error(f"Lycoris Player Error: An unexpected error occurred: {type(e).__name__}: {e}")
+        logging.error(f"[Lycoris] An unexpected error occurred: {type(e).__name__}: {e}")
         # Try Rumble fallback if available
         if rumble_url:
             try:

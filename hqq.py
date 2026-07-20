@@ -73,7 +73,7 @@ async def get_video_from_hqq_player(session, player_url, is_vip: bool = False):
         try:
             x, y = solve_hqq_captcha(image_b64)
         except Exception as e:
-            logging.warning(f"HQQ captcha solving error: {e}")
+            logging.warning(f"[HQQ] Captcha solving error: {e}")
             import traceback
             traceback.print_exc()
             return None, None, None
@@ -148,7 +148,7 @@ def decode_hqq_link(obf_link: str) -> str:
             else:
                 break
         except (ValueError, OverflowError) as e:
-            logging.warning(f"HQQ decode error at position {i}: {e}")
+            logging.warning(f"[HQQ] Decode error at position {i}: {e}")
             break
     
     return result

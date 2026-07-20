@@ -37,7 +37,7 @@ async def get_video_from_sendvid_player(session: aiohttp.ClientSession, player_u
             match = re.search(r'<source[^>]+src="([^"]+)"', html)
 
         if not match:
-            logging.warning("SendVid Player Error: No video source found")
+            logging.warning("[SendVid] No video source found")
             return None, None, None
 
         final_url = match.group(1) if match.lastindex else match.group('url')
@@ -52,7 +52,7 @@ async def get_video_from_sendvid_player(session: aiohttp.ClientSession, player_u
         return final_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"SendVid Player Error: {e}")
+        logging.warning(f"[SendVid] {e}")
         return None, None, None
 
 

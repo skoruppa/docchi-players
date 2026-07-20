@@ -47,7 +47,7 @@ async def get_video_from_turbovid_player(session: aiohttp.ClientSession, player_
         return stream_url, quality, stream_headers
         
     except Exception as e:
-        logging.warning(f"TurboVid Player Error: {e}")
+        logging.warning(f"[TurboVid] {e}")
         return None, None, None
 
 

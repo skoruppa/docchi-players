@@ -45,15 +45,15 @@ def _decode_player_and_get_stream(script_content: str) -> str | None:
         ctx.eval(script_content)
         svg_object_json_string = ctx.eval("JSON.stringify(window.svg)")
         if not svg_object_json_string:
-            logging.warning("VidGuard Player Error: 'window.svg' object not found after JS execution.")
+            logging.warning("[VidGuard] 'window.svg' object not found after JS execution")
             return None
         svg_object = json.loads(svg_object_json_string)
         if svg_object and isinstance(svg_object, dict) and 'stream' in svg_object:
             return svg_object['stream']
-        logging.warning("VidGuard Player Error: 'stream' key not found in 'window.svg' object.")
+        logging.warning("[VidGuard] 'stream' key not found in 'window.svg' object")
         return None
     except Exception as e:
-        logging.warning(f"VidGuard Player Error: An exception occurred during JS execution: {e}")
+        logging.warning(f"[VidGuard] Exception during JS execution: {e}")
         return None
 
 
@@ -82,13 +82,13 @@ async def get_video_from_vidguard_player(session: aiohttp.ClientSession, player_
                 break
 
         if not script_content:
-            logging.warning("VidGuard Player Error: Could not find the obfuscated script containing 'ﾟωﾟ'.")
+            logging.warning("[VidGuard] Could not find the obfuscated script containing 'ﾟωﾟ'")
             return None, None, None
 
         raw_stream_url = await loop.run_in_executor(None, _decode_player_and_get_stream, script_content)
 
         if not raw_stream_url:
-            logging.warning("VidGuard Player Error: Failed to decode stream URL from script.")
+            logging.warning("[VidGuard] Failed to decode stream URL from script")
             return None, None, None
 
         parsed_stream_url = urlparse(raw_stream_url)
@@ -107,11 +107,11 @@ async def get_video_from_vidguard_player(session: aiohttp.ClientSession, player_
             try:
                 step2 = base64.b64decode(step1).decode('utf-8')
             except Exception as e:
-                logging.warning(f"VidGuard Base64 Decode Error: {e}")
+                logging.warning(f"[VidGuard] Base64 decode error: {e}")
                 return None, None, None
 
             if len(step2) < 10:
-                logging.warning(f"VidGuard Error: Decoded string is too short: {step2}")
+                logging.warning(f"[VidGuard] Decoded string is too short: {step2}")
                 return None, None, None
 
             trimmed = step2[5:-5]
@@ -131,12 +131,12 @@ async def get_video_from_vidguard_player(session: aiohttp.ClientSession, player_
             if fetched_quality:
                 quality = fetched_quality
         except Exception as e:
-            logging.warning(f"VidGuard Info: Could not fetch resolution. Reason: {e}")
+            logging.warning(f"[VidGuard] Could not fetch resolution: {e}")
 
         return final_stream_url, quality, stream_headers
 
     except Exception as e:
-        logging.warning(f"VidGuard Player Error: Unexpected error: {e}")
+        logging.warning(f"[VidGuard] Unexpected error: {e}")
         return None, None, None
 
 
