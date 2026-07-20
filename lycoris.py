@@ -98,20 +98,55 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
             logging.error("[Lycoris] Episode ID not found.")
             return None, None, None
 
-        # Get encoded video link (retry once on timeout)
+        # Get encoded video link (race: direct vs proxy, take first response)
         video_link_url = f"https://www.lycoris.cafe/api/watch/getVideoLink?id={episode_id}"
         _last_step = f"GET {video_link_url}"
         encrypted_text = None
-        for _attempt in range(2):
-            try:
-                async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=3)) as link_response:
-                    link_response.raise_for_status()
-                    encrypted_text = await link_response.text()
+
+        async def _fetch_direct():
+            async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                resp.raise_for_status()
+                return await resp.text()
+
+        async def _fetch_proxy():
+            proxied = f'{STREAM_PROXY_URL}/proxy/stream?d={video_link_url}&api_password={STREAM_PROXY_PASSWORD}&h_user-agent={_compat_ua}'
+            async with session.get(proxied, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                resp.raise_for_status()
+                return await resp.text()
+
+        if PROXIFY_STREAMS:
+            # Race both paths, use whichever responds first
+            tasks = [asyncio.ensure_future(_fetch_direct()), asyncio.ensure_future(_fetch_proxy())]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for t in pending:
+                t.cancel()
+            for t in done:
+                if t.exception() is None:
+                    encrypted_text = t.result()
                     break
-            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
-                if _attempt == 0:
-                    continue  # retry once
-                raise
+            # If first winner failed, try remaining
+            if not encrypted_text:
+                for t in pending:
+                    t.cancel()
+                # Both failed in race — try one more time sequentially
+                try:
+                    encrypted_text = await _fetch_proxy()
+                except Exception:
+                    pass
+        else:
+            for _attempt in range(2):
+                try:
+                    encrypted_text = await _fetch_direct()
+                    break
+                except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+                    if _attempt == 0:
+                        continue
+                    raise
+
+        if not encrypted_text:
+            if rumble_url:
+                return await get_video_from_rumble_player(session, rumble_url)
+            return None, None, None
 
         base64_encoded_data = base64.b64encode(encrypted_text.encode('latin-1')).decode('utf-8')
 
