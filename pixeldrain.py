@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from urllib.parse import urlparse
 
@@ -25,7 +26,7 @@ async def get_video_from_pixeldrain_player(session: aiohttp.ClientSession, playe
         # Regex to capture the type (u, l, file) and the ID
         match = re.search(r'/(u|l|file)/([0-9a-zA-Z\-]+)', path)
         if not match:
-            print(f"PixelDrain Error: Invalid URL format for {player_url}")
+            logging.warning(f"PixelDrain Error: Invalid URL format for {player_url}")
             return None, None, None
 
         mtype, mid = match.groups()
@@ -44,19 +45,19 @@ async def get_video_from_pixeldrain_player(session: aiohttp.ClientSession, playe
 
             if not data.get('success'):
                 error_message = data.get('message', 'Unknown API error')
-                print(f"PixelDrain API Error for list {mid}: {error_message}")
+                logging.warning(f"PixelDrain API Error for list {mid}: {error_message}")
                 return None, None, None
 
             # Filter for video files and select the largest one
             video_files = [f for f in data.get('files', []) if f.get('mime_type') and 'video' in f['mime_type']]
             if not video_files:
-                print(f"PixelDrain Error: No video files found in list {mid}.")
+                logging.warning(f"PixelDrain Error: No video files found in list {mid}.")
                 return None, None, None
 
             largest_video = max(video_files, key=lambda x: x.get('size', 0))
             file_id = largest_video.get('id')
             if not file_id:
-                print("PixelDrain Error: Could not determine file ID from the largest video.")
+                logging.warning("PixelDrain Error: Could not determine file ID from the largest video.")
                 return None, None, None
 
             stream_url = f"https://pixeldrain.com/api/file/{file_id}"
@@ -73,10 +74,10 @@ async def get_video_from_pixeldrain_player(session: aiohttp.ClientSession, playe
             return stream_url, quality, stream_headers
 
     except aiohttp.ClientError as http_err:
-        print(f"PixelDrain Player Error: An HTTP error occurred: {http_err}")
+        logging.warning(f"PixelDrain Player Error: An HTTP error occurred: {http_err}")
         return None, None, None
     except Exception as e:
-        print(f"PixelDrain Player Error: An unexpected error occurred: {e}")
+        logging.warning(f"PixelDrain Player Error: An unexpected error occurred: {e}")
         return None, None, None
 
     # Fallback return

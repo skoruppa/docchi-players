@@ -1,5 +1,6 @@
 import re
 import ast
+import logging
 import aiohttp
 from urllib.parse import urlparse, urljoin
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8, get_packed_data
@@ -65,7 +66,7 @@ async def get_video_from_earnvid_player(session: aiohttp.ClientSession, player_u
         return None, None, None
 
     except Exception as e:
-        print(f"EarnVid Player Error: {e}")
+        logging.warning(f"EarnVid Player Error: {e}")
         return None, None, None
 
 if __name__ == '__main__':

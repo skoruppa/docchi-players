@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 
 from app.utils.common_utils import get_random_agent, get_packed_data
@@ -68,7 +69,6 @@ async def get_video_from_lulustream_player(session: aiohttp.ClientSession, filel
             m3u8_match = re.search(r'sources: \[\{file:"(https?://[^"]+)"\}\]', html_content)
             stream_url = m3u8_match.group(1)
         if not m3u8_match or not stream_url:
-            print(html_content)
             return None, None, None
     except AttributeError:
         return None, None, None

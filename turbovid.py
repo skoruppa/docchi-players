@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 
@@ -46,7 +47,7 @@ async def get_video_from_turbovid_player(session: aiohttp.ClientSession, player_
         return stream_url, quality, stream_headers
         
     except Exception as e:
-        print(f"TurboVid Player Error: {e}")
+        logging.warning(f"TurboVid Player Error: {e}")
         return None, None, None
 
 

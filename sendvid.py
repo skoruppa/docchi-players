@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from urllib.parse import urlparse
 from app.utils.common_utils import get_random_agent
@@ -36,7 +37,7 @@ async def get_video_from_sendvid_player(session: aiohttp.ClientSession, player_u
             match = re.search(r'<source[^>]+src="([^"]+)"', html)
 
         if not match:
-            print("SendVid Player Error: No video source found")
+            logging.warning("SendVid Player Error: No video source found")
             return None, None, None
 
         final_url = match.group(1) if match.lastindex else match.group('url')
@@ -51,7 +52,7 @@ async def get_video_from_sendvid_player(session: aiohttp.ClientSession, player_u
         return final_url, quality, stream_headers
 
     except Exception as e:
-        print(f"SendVid Player Error: {e}")
+        logging.warning(f"SendVid Player Error: {e}")
         return None, None, None
 
 

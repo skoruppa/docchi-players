@@ -2,6 +2,7 @@ import re
 import json
 import hashlib
 import base64
+import logging
 import aiohttp
 from urllib.parse import urljoin
 from app.utils.common_utils import get_random_agent
@@ -294,11 +295,11 @@ async def get_video_from_abyss_player(session: aiohttp.ClientSession, url: str, 
         if source:
             return source, quality, {'request': headers}
 
-        print("Abyss Player Error: No video source found")
+        logging.warning("Abyss Player Error: No video source found")
         return None, None, None
 
     except Exception as e:
-        print(f"Abyss Player Error: {e}")
+        logging.warning(f"Abyss Player Error: {e}")
         return None, None, None
 
 

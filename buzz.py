@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from app.utils.common_utils import get_random_agent
 from config import Config
@@ -54,7 +55,7 @@ async def get_video_from_buzz_player(session: aiohttp.ClientSession, player_url:
         return stream_url, quality, stream_headers
         
     except Exception as e:
-        print(f"Buzz Player Error: {e}")
+        logging.warning(f"Buzz Player Error: {e}")
         return None, None, None
 
 

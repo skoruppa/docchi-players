@@ -1,6 +1,7 @@
 import re
 import json
 import hashlib
+import logging
 import aiohttp
 from app.utils.common_utils import get_random_agent
 
@@ -26,7 +27,7 @@ async def handle_waf_challenge(session, url, video_id, request_headers):
                 if hash429_cookie:
                     hash429 = hashlib.md5(hash429_cookie.encode('ascii')).hexdigest()
                     challenge_url = f"{response_url}&key={hash429}"
-                    print(f"Dealing with WAF: {challenge_url}")
+                    logging.debug(f"Dealing with WAF: {challenge_url}")
                     async with session.get(challenge_url, headers=request_headers) as challenge_response:
                         pass
                     async with session.get(url, headers=request_headers) as new_response:
@@ -34,7 +35,7 @@ async def handle_waf_challenge(session, url, video_id, request_headers):
 
             return await response.text()
     except Exception as e:
-        print(f"Failed WAF: {e}")
+        logging.warning(f"Failed WAF: {e}")
         return None
 
 
@@ -268,7 +269,7 @@ async def get_video_from_vk_player(session: aiohttp.ClientSession, url, is_vip: 
 
     video_id = extract_video_id(url)
     if not video_id:
-        print("Failed getting video ID from the URL")
+        logging.warning("Failed getting video ID from the URL")
         return None, None, None
 
     video_url, quality = await get_video_via_api(session, video_id, user_agent)
@@ -311,7 +312,7 @@ async def get_video_from_vk_player(session: aiohttp.ClientSession, url, is_vip: 
             return None, None, None
 
     except Exception as e:
-        print(f"Error extracting VK video: {str(e)}")
+        logging.warning(f"Error extracting VK video: {str(e)}")
         return None, None, None
 
 

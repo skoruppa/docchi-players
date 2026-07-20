@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from urllib.parse import urlparse
 from app.utils.common_utils import get_random_agent
@@ -54,7 +55,7 @@ async def get_video_from_vidoza_player(session: aiohttp.ClientSession, player_ur
                 stream_headers = {'request': {'User-Agent': user_agent}}
                 return final_url, 'unknown', stream_headers
 
-            print("Vidoza Player Error: No video sources found")
+            logging.warning("Vidoza Player Error: No video sources found")
             return None, None, None
 
         # Pick highest quality
@@ -75,7 +76,7 @@ async def get_video_from_vidoza_player(session: aiohttp.ClientSession, player_ur
         return best_url, quality, stream_headers
 
     except Exception as e:
-        print(f"Vidoza Player Error: {e}")
+        logging.warning(f"Vidoza Player Error: {e}")
         return None, None, None
 
 

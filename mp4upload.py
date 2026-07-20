@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 
 
@@ -31,7 +32,7 @@ async def get_video_from_mp4upload_player(session: aiohttp.ClientSession, player
         stream_url_match = re.search(r'player\.src\(\s*{\s*type:\s*"video/mp4",\s*src:\s*"([^"]+)"', html_content)
 
         if not stream_url_match:
-            print("MP4Upload Player Error: No video")
+            logging.warning("MP4Upload Player Error: No video")
             return None, None, None
 
         stream_url = stream_url_match.group(1)
@@ -47,7 +48,7 @@ async def get_video_from_mp4upload_player(session: aiohttp.ClientSession, player
         return stream_url, quality, stream_headers
 
     except Exception as e:
-        print(f"MP4Upload Player Error: Unexpected Error: {e}")
+        logging.warning(f"MP4Upload Player Error: Unexpected Error: {e}")
         return None, None, None
 
 

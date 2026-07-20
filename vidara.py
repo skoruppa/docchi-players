@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from urllib.parse import urljoin, urlparse
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
@@ -15,7 +16,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
     try:
         match = re.search(r'/(?:e|v)/([0-9a-zA-Z]+)', url)
         if not match:
-            print("Vidara Player Error: Invalid URL format")
+            logging.warning("Vidara Player Error: Invalid URL format")
             return None, None, None
 
         media_id = match.group(1)
@@ -44,7 +45,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
 
         streaming_url = data.get('streaming_url')
         if not streaming_url:
-            print("Vidara Player Error: No streaming_url in response")
+            logging.warning("Vidara Player Error: No streaming_url in response")
             return None, None, None
 
         del headers['Content-Type']
@@ -58,7 +59,7 @@ async def get_video_from_vidara_player(session: aiohttp.ClientSession, url: str,
         return streaming_url, quality, stream_headers
 
     except Exception as e:
-        print(f"Vidara Player Error: {e}")
+        logging.warning(f"Vidara Player Error: {e}")
         return None, None, None
 
 

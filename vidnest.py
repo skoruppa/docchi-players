@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from bs4 import BeautifulSoup
 from app.utils.common_utils import get_random_agent
@@ -29,7 +30,7 @@ async def get_video_from_vidnest_player(session: aiohttp.ClientSession, url: str
         match = re.search(pattern, html_content)
 
         if not match:
-            print("Vidnest Player Error: No video source found")
+            logging.warning("Vidnest Player Error: No video source found")
             return None, None, None
 
         stream_url = match.group(1)
@@ -46,7 +47,7 @@ async def get_video_from_vidnest_player(session: aiohttp.ClientSession, url: str
         return stream_url, quality, stream_headers
 
     except Exception as e:
-        print(f"Vidnest Player Error: {e}")
+        logging.warning(f"Vidnest Player Error: {e}")
         return None, None, None
 
 

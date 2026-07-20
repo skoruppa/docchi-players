@@ -1,5 +1,6 @@
 import re
 import json
+import logging
 import base64
 import aiohttp
 from urllib.parse import urljoin
@@ -158,7 +159,7 @@ async def get_video_from_voe_player(session: aiohttp.ClientSession, player_url: 
         return None, None, None
         
     except Exception as e:
-        print(f"VOE Player Error: {e}")
+        logging.warning(f"VOE Player Error: {e}")
         return None, None, None
 
 

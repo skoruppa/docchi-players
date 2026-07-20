@@ -2,6 +2,7 @@ import re
 import time
 import string
 import random
+import logging
 import aiohttp
 from urllib.parse import urlparse, urljoin
 from app.utils.common_utils import get_random_agent
@@ -98,7 +99,7 @@ async def get_video_from_dood_player(session: aiohttp.ClientSession, player_url:
         return final_url, quality, stream_headers
 
     except Exception as e:
-        print(f"Dood Player Error: {e}")
+        logging.warning(f"Dood Player Error: {e}")
         return None, None, None
 
 

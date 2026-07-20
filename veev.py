@@ -1,5 +1,6 @@
 import re
 import json
+import logging
 import binascii
 import aiohttp
 from urllib.parse import urljoin, urlencode, urlparse
@@ -82,7 +83,7 @@ async def get_video_from_veev_player(session: aiohttp.ClientSession, player_url:
         # Extract encoded tokens from page
         items = re.findall(r'''[\.\s'](?:fc|_vvto\[[^\]]*)(?:['\]]*)?\s*[:=]\s*['"]([^'"]+)''', html)
         if not items:
-            print("Veev Player Error: No encoded tokens found")
+            logging.warning("Veev Player Error: No encoded tokens found")
             return None, None, None
 
         for f in items[::-1]:
@@ -128,11 +129,11 @@ async def get_video_from_veev_player(session: aiohttp.ClientSession, player_url:
                     stream_headers = {'request': {'Referer': web_url, 'User-Agent': user_agent}}
                     return final_url, quality, stream_headers
 
-        print("Veev Player Error: Unable to locate video")
+        logging.warning("Veev Player Error: Unable to locate video")
         return None, None, None
 
     except Exception as e:
-        print(f"Veev Player Error: {e}")
+        logging.warning(f"Veev Player Error: {e}")
         return None, None, None
 
 

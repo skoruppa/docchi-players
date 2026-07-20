@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 
 from app.utils.common_utils import get_random_agent, get_packed_data
@@ -69,7 +70,6 @@ async def get_video_from_vidtube_player(session: aiohttp.ClientSession, filelink
                 stream_url = mp4_match.group(1)
                 label_match = re.search(r'label\s*:\s*"([^"]+)"', html_content, re.IGNORECASE)
             if not mp4_match or not stream_url:
-                print(html_content)
                 return None, None, None
         except AttributeError:
             return None, None, None

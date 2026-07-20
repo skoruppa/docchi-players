@@ -1,4 +1,5 @@
 import re
+import logging
 import aiohttp
 from urllib.parse import urlparse, quote
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
@@ -65,7 +66,7 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
         return None, None, None
     
     except Exception as e:
-        print(f"Dailymotion Player Error: {e}")
+        logging.warning(f"Dailymotion Player Error: {e}")
         return None, None, None
 
 if __name__ == '__main__':
