@@ -43,6 +43,20 @@ async def get_video_from_streamup_player(session: aiohttp.ClientSession, player_
             page_response.raise_for_status()
             page_content = await page_response.text()
 
+        # Handle JS redirect challenge (window.location.replace with JWT token)
+        js_redirect = re.search(r"window\.location\.replace\(['\"]([^'\"]+)['\"]\)", page_content)
+        if js_redirect and 'decodePrintable95' not in page_content:
+            redirect_url = js_redirect.group(1)
+            async with session.get(redirect_url, headers=page_headers, allow_redirects=False,
+                                   timeout=aiohttp.ClientTimeout(total=3)) as redir_response:
+                # If server redirects to a parking/ad domain, the link is dead
+                if redir_response.status in (301, 302, 303, 307):
+                    return None, None, None
+                redir_response.raise_for_status()
+                page_content = await redir_response.text()
+                if not page_content or page_content.strip() == 'Redirecting':
+                    return None, None, None
+
         parsed_url = urlparse(str(page_response.url))
         base_url_with_scheme = f"{parsed_url.scheme}://{parsed_url.netloc}"
         headers = {"User-Agent": user_agent, "Referer": player_url}
