@@ -4,6 +4,7 @@ import base64
 import ctypes
 import logging
 import os
+import asyncio
 import aiohttp
 import yarl
 from binascii import hexlify
@@ -108,15 +109,16 @@ def _sign_nonce(private_key, nonce: str) -> str:
     return _b64urlencode(signature)
 
 
-def _solve_pow(nonce: str, difficulty: int, max_iterations: int = 500000) -> str:
+async def _solve_pow(nonce: str, difficulty: int, max_iterations: int = 500000) -> str:
     """
-    Solve Byse Proof-of-Work challenge using native C solver.
-    The hash is a custom memory-hard function (NOT standard SHA-256).
-    Format: hash(nonce + ":" + counter_str), check leading zero bits.
+    Solve Byse Proof-of-Work challenge using native C solver in a thread.
+    Runs in thread pool to avoid blocking the asyncio event loop (CPU-bound).
     """
     import time as _t
     start = _t.time()
-    result = _solve_pow_native(nonce, difficulty, max_iterations)
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, _solve_pow_native, nonce, difficulty, max_iterations
+    )
     elapsed = (_t.time() - start) * 1000
     logging.info(f"[Filemoon] PoW solved (native): solution={result}, difficulty={difficulty}, time={elapsed:.0f}ms")
     return result
@@ -502,7 +504,7 @@ async def _do_challenge_flow(session: aiohttp.ClientSession, host: str, media_id
     pow_token = captcha_data["pow_token"]
 
     # --- Step 4: Solve PoW and verify ---
-    solution = _solve_pow(pow_nonce, pow_difficulty)
+    solution = await _solve_pow(pow_nonce, pow_difficulty)
 
     verify_url = f"{base}/api/videos/{media_id}/{embed_prefix}captcha/verify"
     verify_payload = {
