@@ -34,14 +34,18 @@ DOMAINS = ['f16px.com', 'bysesayeveum.com', 'bysetayico.com', 'bysevepoin.com', 
     'filemoon.wf', 'cinegrab.com', 'filemoon.eu', 'filemoon.art', 'moonmov.pro', '96ar.com',
     'kerapoxy.cc', 'furher.in', '1azayf9w.xyz', '81u6xl9d.xyz', 'smdfs40r.skin', 'c1z39.com',
     'bf0skv.org', 'z1ekv717.fun', 'l1afav.net', '222i8x.lol', '8mhlloqo.fun', 'f51rm.com',
-    'xcoic.com', 'boosteradx.online', 'streamlyplayer.online', 'bysewihe.com', 'byselapuix.com', 'byseqekaho.com',
-    'embedplaybyse.top', 'rupertisdivingintoocean.com']
+    'xcoic.com', 'boosteradx.online', 'streamlyplayer.online', 'streamlyplayero.online',
+    'bysewihe.com', 'byselapuix.com', 'byseqekaho.com',
+    'embedplaybyse.top', 'rupertisdivingintoocean.com', 'sb1254w9megshle.org']
 NAMES = ['filemoon', 'byse']
 
-REDIRECT_DOMAINS = ['boosteradx.online', 'byse.sx']
+REDIRECT_DOMAINS = ['boosteradx.online', 'byse.sx', 'streamlyplayer.online']
 
 # NOTE: Requires proxy for IP-bound extraction and stream playback
 ENABLED = True
+
+# Fixed UA for filemoon (attest cache is tied to user_agent — random UA breaks cache)
+_FILEMOON_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
 
 # --- Crypto helpers ---
@@ -225,7 +229,7 @@ def _generate_client_fingerprint():
         return _b64urlencode(urandom(32))
 
     return {
-        "user_agent": get_random_agent(),
+        "user_agent": _FILEMOON_UA,
         "pixel_ratio": choice([1, 2]),
         "screen_width": screen_widths[idx],
         "screen_height": screen_heights[idx],
@@ -373,9 +377,6 @@ def _get_cached_attest(host: str, user_agent: str) -> dict | None:
     if _time_module.time() - cached['timestamp'] > _ATTEST_CACHE_TTL:
         del _attest_cache[host]
         return None
-    # Must be same user_agent (fingerprint is tied to it)
-    if cached['user_agent'] != user_agent:
-        return None
     return cached
 
 
@@ -386,7 +387,6 @@ def _set_cached_attest(host: str, user_agent: str, token: str, viewer_id: str, d
         'viewer_id': viewer_id,
         'device_id': device_id,
         'confidence': confidence,
-        'user_agent': user_agent,
         'timestamp': _time_module.time(),
     }
 
@@ -576,11 +576,11 @@ async def get_video_from_filemoon_player(session: aiohttp.ClientSession, url: st
 
         # Redirect domains (static list)
         if host in REDIRECT_DOMAINS or host == 'filemoon.to':
-            host = 'streamlyplayer.online'
+            host = 'streamlyplayero.online'
 
         ref = f"https://{host}/"
         headers = {
-            "User-Agent": get_random_agent(),
+            "User-Agent": _FILEMOON_UA,
             "Referer": ref,
             "Origin": ref.rstrip('/')
         }
