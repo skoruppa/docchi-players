@@ -104,13 +104,13 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         encrypted_text = None
 
         async def _fetch_direct():
-            async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            async with session.get(video_link_url, headers={"User-Agent": _compat_ua}, timeout=aiohttp.ClientTimeout(total=7)) as resp:
                 resp.raise_for_status()
                 return await resp.text()
 
         async def _fetch_proxy():
             proxied = f'{STREAM_PROXY_URL}/proxy/stream?d={video_link_url}&api_password={STREAM_PROXY_PASSWORD}&h_user-agent={_compat_ua}'
-            async with session.get(proxied, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            async with session.get(proxied, timeout=aiohttp.ClientTimeout(total=7)) as resp:
                 resp.raise_for_status()
                 return await resp.text()
 
@@ -147,6 +147,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
                     raise
 
         if not encrypted_text:
+            logging.warning("[Lycoris] getVideoLink failed (both direct and proxy timed out)")
             if rumble_url:
                 return await get_video_from_rumble_player(session, rumble_url)
             return None, None, None
@@ -165,7 +166,7 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
         decrypt_response_data = None
         for _attempt in range(2):
             try:
-                async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as decrypt_response:
+                async with session.post(decrypt_url, headers=decrypt_headers, json=payload, timeout=aiohttp.ClientTimeout(total=7)) as decrypt_response:
                     decrypt_response.raise_for_status()
                     decrypt_response_data = await decrypt_response.json()
                     break
@@ -176,25 +177,18 @@ async def get_video_from_lycoris_player(session: aiohttp.ClientSession, url: str
 
         video_sources = decrypt_response_data
 
-        highest_quality = None
+        # Try FHD URL candidates
+        status = None
         if video_sources.get('FHD'):
-            highest_quality = {"url": video_sources['FHD'], 'quality': '1080p'}
-        elif video_sources.get('HD'):
-            highest_quality = {"url": video_sources['HD'], 'quality': '720p'}
-        elif video_sources.get('SD'):
-            highest_quality = {"url": video_sources['SD'], 'quality': '480p'}
-
-        if highest_quality:
-            url_candidates = [u.strip() for u in highest_quality['url'].split(' or ') if u.strip()]
-            quality = highest_quality['quality']
+            url_candidates = [u.strip() for u in video_sources['FHD'].split(' or ') if u.strip()]
             for url_candidate in url_candidates:
                 _last_step = f"check_url_status {url_candidate}"
                 status = await check_url_status(session, url_candidate)
                 if status in (200, 206):
-                    return url_candidate, quality, None
+                    return url_candidate, '1080p', None
             logging.warning(f"[Lycoris] All URL candidates failed status check (last status: {status})")
         else:
-            logging.warning("[Lycoris] No video sources in decrypt response")
+            logging.warning("[Lycoris] No FHD source in decrypt response")
 
         # Fallback to Rumble if primary sources fail
         if rumble_url:
