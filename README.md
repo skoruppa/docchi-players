@@ -19,7 +19,7 @@ A collection of async Python video player extractors for anime streaming sites. 
 | Lycoris.cafe | lycoris.cafe | |
 | MP4Upload | mp4upload.com | |
 | OK.ru | ok.ru | |
-| Pixeldrain | pixeldrain.com | ✓ |
+| Pixeldrain | pixeldrain.com | |
 | Rumble | rumble.com | |
 | Savefiles / StreamHG | savefiles.com, bigwarp.io | |
 | SendVid | sendvid.com | |
