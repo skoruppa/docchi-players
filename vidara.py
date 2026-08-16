@@ -5,8 +5,12 @@ from urllib.parse import urljoin, urlparse
 from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 
 # Domains handled by this player
-DOMAINS = ['vidara.so', 'vidara.to', 'vidaraa.cc', 'vidavaca.cc', 'thebesthosterv.com', 'vidchampions.com', 'streamix.so', 'stmix.io', 'viewdara.com', 'odysseusa.cc']
+DOMAINS = ['vidara.so', 'vidara.to', 'vidaraa.cc', 'vidavaca.cc', 'thebesthosterv.com', 'vidchampions.com', 'streamix.so', 'stmix.io', 'viewdara.com', 'odysseusa.cc', 'shadowbyte.site']
 NAMES = ['vidara', 'vidavaca', 'streamix']
+
+# URL pattern for dynamic domain detection (vidara rotates domains frequently)
+# Used by player_utils.detect_player as a fallback for unknown domains
+URL_PATTERN = r'^https?://[^/]+/e/[a-zA-Z0-9]{8,}$'
 
 ENABLED = True
 
