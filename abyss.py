@@ -9,7 +9,7 @@ from app.utils.common_utils import get_random_agent
 from app.players.test import run_tests
 
 # Domains handled by this player
-DOMAINS = ['abysscdn.com', 'hydraxcdn.biz', 'short.icu', 'embedplayabyss.top']
+DOMAINS = ['abysscdn.com', 'abyssplayer.com', 'hydraxcdn.biz', 'short.icu', 'embedplayabyss.top']
 NAMES = ['abyss']
 
 ENABLED = True
@@ -158,6 +158,21 @@ def _build_sora_token(path_value: str, size_value) -> str | None:
     return second
 
 
+def _normalize_quality(label, size=None) -> str | None:
+    """Normalize quality label. Falls back to size-based guess if label is not a resolution."""
+    if label and re.match(r'^\d{3,4}p$', str(label)):
+        return str(label)
+    # Map common labels to resolutions
+    SIZE_MAP = {
+        1920: '1080p', 1280: '720p', 854: '480p', 640: '360p',
+        3840: '4K', 2560: '1440p',
+    }
+    if size and int(size) in SIZE_MAP:
+        return SIZE_MAP[int(size)]
+    # Label like "Origin" or "original" → unknown
+    return None
+
+
 def _extract_from_media_payload(media_payload: dict, slug, md5_id, is_download=False) -> tuple[str | None, str | None]:
     """Extract stream URL and quality from decrypted media payload."""
     if not isinstance(media_payload, dict):
@@ -172,7 +187,7 @@ def _extract_from_media_payload(media_payload: dict, slug, md5_id, is_download=F
     )
 
     for src in sources:
-        label = src.get('label')
+        label = _normalize_quality(src.get('label'), src.get('size'))
         direct = src.get('file')
         if isinstance(direct, str) and direct:
             return direct.replace('\\/', '/'), label
@@ -211,7 +226,7 @@ def _extract_from_media_payload(media_payload: dict, slug, md5_id, is_download=F
         token = _build_sora_token(path_value, str(size))
         if token:
             norm = domain if domain.startswith('http') else f'https://{domain}'
-            return f'{norm.rstrip("/")}/sora/{size}/{token}', label
+            return f'{norm.rstrip("/")}/sora/{size}/{token}', _normalize_quality(label, size)
 
     # HLS by ID fallback
     hls_id = hls.get('id')
