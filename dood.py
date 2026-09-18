@@ -125,8 +125,19 @@ async def get_video_from_dood_player(session: aiohttp.ClientSession, player_url:
         else:
             final_url = dood_decode(base_url) + token + str(int(time.time() * 1000))
 
-        stream_headers = {'request': {'Referer': f'https://{host}/', 'User-Agent': user_agent}}
-        return final_url, quality, stream_headers
+        stream_headers = {'Referer': f'https://{host}/', 'User-Agent': user_agent}
+
+        # Dood is IP-bound — proxy the stream through the same proxy that extracted it
+        if PROXIFY_STREAMS and working_proxy >= 0:
+            from app.utils.proxy_utils import generate_proxy_url
+            final_url = await generate_proxy_url(
+                session, final_url, '/proxy/stream',
+                request_headers=stream_headers,
+                proxy_index=working_proxy,
+            )
+            return final_url, quality, None
+
+        return final_url, quality, {'request': stream_headers}
 
     except Exception as e:
         logging.warning(f"[Dood] {type(e).__name__}: {e or 'no details'}")
