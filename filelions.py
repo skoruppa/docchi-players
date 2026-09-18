@@ -7,7 +7,7 @@ import re
 import logging
 import aiohttp
 from urllib.parse import urljoin
-from app.utils.common_utils import get_random_agent
+from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 from app.utils.proxy_utils import generate_proxy_url
 from app.utils.jsunpack import unpack as js_unpack
 from config import Config
@@ -162,16 +162,11 @@ async def get_video_from_filelions_player(session: aiohttp.ClientSession, url: s
 
 
 async def _finalize(session, stream_url, headers):
-    """Proxify stream if needed and return."""
-    quality = 'unknown'
-
-    if PROXIFY_STREAMS:
-        stream_url = await generate_proxy_url(
-            session, stream_url, '/proxy/hls/manifest.m3u8',
-            request_headers=headers
-        )
-        return stream_url, quality, None
-
+    """Return stream URL with resolved quality."""
+    try:
+        quality = await fetch_resolution_from_m3u8(session, stream_url, headers) or 'unknown'
+    except Exception:
+        quality = 'unknown'
     return stream_url, quality, {'request': headers}
 
 
