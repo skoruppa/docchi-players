@@ -1,7 +1,6 @@
 import re
 import logging
 import aiohttp
-from aiohttp.client_exceptions import ClientConnectorError, ClientResponseError
 import json
 import urllib.parse
 from app.utils.proxy_utils import generate_proxy_url
@@ -12,8 +11,6 @@ DOMAINS = ['m.cda.pl', 'cda.pl', 'www.cda.pl', 'ebd.cda.pl']
 NAMES = ['cda']
 
 PROXIFY_STREAMS = Config.PROXIFY_STREAMS
-STREAM_PROXY_URL = Config.STREAM_PROXY_URL
-STREAM_PROXY_PASSWORD = Config.STREAM_PROXY_PASSWORD
 
 
 def decrypt_url(url: str) -> str:
@@ -50,17 +47,12 @@ def get_highest_quality(qualities: dict) -> tuple:
 
 
 async def _proxy_get_html(session: aiohttp.ClientSession, url: str) -> str | None:
-    """GET request through proxy and return HTML text."""
+    """GET request through proxy with fallback."""
     if PROXIFY_STREAMS:
-        forward_url = (
-            f'{STREAM_PROXY_URL}/proxy/stream?d={url}'
-            f'&api_password={STREAM_PROXY_PASSWORD}'
-            f'&h_user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        )
-        async with session.get(forward_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status != 200:
-                return None
-            return await resp.text()
+        from app.utils.proxy_utils import proxy_get
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        text, _ = await proxy_get(session, url, headers=headers)
+        return text
     else:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             resp.raise_for_status()
@@ -68,21 +60,13 @@ async def _proxy_get_html(session: aiohttp.ClientSession, url: str) -> str | Non
 
 
 async def _proxy_post_html(session: aiohttp.ClientSession, url: str, form_data: dict) -> str | None:
-    """POST form data through proxy and return HTML text."""
+    """POST form data through proxy with fallback."""
     if PROXIFY_STREAMS:
-        forward_url = (
-            f'{STREAM_PROXY_URL}/proxy/forward?d={url}'
-            f'&api_password={STREAM_PROXY_PASSWORD}'
-            f'&h_user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            f'&h_content-type=application/x-www-form-urlencoded'
-        )
+        from app.utils.proxy_utils import proxy_post
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         body = urllib.parse.urlencode(form_data)
-        async with session.post(forward_url, data=body,
-                                headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                                timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status != 200:
-                return None
-            return await resp.text()
+        text, _ = await proxy_post(session, url, data=body, headers=headers)
+        return text
     else:
         data = aiohttp.FormData()
         for k, v in form_data.items():
