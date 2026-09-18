@@ -3,10 +3,15 @@ import aiohttp
 from aiohttp.client_exceptions import ClientConnectorError, ClientResponseError
 import json
 import urllib.parse
+from app.utils.proxy_utils import generate_proxy_url
+from app.utils.common_utils import fetch_resolution_from_m3u8
+from config import Config
 
 # Domains handled by this player
 DOMAINS = ['m.cda.pl', 'cda.pl', 'www.cda.pl', 'ebd.cda.pl']
 NAMES = ['cda']
+
+PROXIFY_STREAMS = Config.PROXIFY_STREAMS
 
 
 def decrypt_url(url: str) -> str:
@@ -99,15 +104,26 @@ async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is
         file = video_data['video']['file']
     if file:
         url = decrypt_url(file)
-        headers = {"request": {"Referer": f"https://ebd.cda.pl/620x368/{video_id}" }}
     else:
         url = video_data['video']['manifest_apple']
-        headers = {"request": {"Referer": f"https://ebd.cda.pl/620x368/{video_id}" }}
 
-    if url:
-        return url, highest_quality, headers
+    if not url:
+        return None, None, None
 
-    return None, None, None
+    referer = f"https://ebd.cda.pl/620x368/{video_id}"
+    request_headers = {"Referer": referer}
+
+    # CDA is IP-bound — must proxy through mediaflow
+    if PROXIFY_STREAMS:
+        is_hls = url.endswith('.m3u8') or '/manifest' in url
+        proxy_endpoint = '/proxy/hls/manifest.m3u8' if is_hls else '/proxy/stream'
+        url = await generate_proxy_url(
+            session, url, proxy_endpoint,
+            request_headers=request_headers
+        )
+        return url, highest_quality, None
+
+    return url, highest_quality, {"request": request_headers}
 
 if __name__ == '__main__':
     from app.players.test import run_tests
