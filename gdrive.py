@@ -50,7 +50,7 @@ async def get_video_from_gdrive_player(session: aiohttp.ClientSession, drive_url
     item_id = match.group(1)
     has_cookie = bool(Config.GDRIVE_COOKIE)
 
-    # Check quality using get_video_info
+    # Check quality using get_video_info (optional — quota errors don't block extraction)
     info_url = f'https://drive.google.com/u/0/get_video_info?docid={item_id}&drive_originator_app=303'
     headers = _get_gdrive_headers(with_cookie=has_cookie)
 
@@ -58,9 +58,6 @@ async def get_video_from_gdrive_player(session: aiohttp.ClientSession, drive_url
     try:
         async with session.get(info_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
             html = await response.text()
-
-        if 'reason=' in html:
-            return None, None, None
 
         fmt_match = re.findall(r'fmt_stream_map=([^&]+)', html)
         if fmt_match:
