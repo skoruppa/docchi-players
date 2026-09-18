@@ -1,5 +1,6 @@
 import re
 import aiohttp
+from config import Config
 from app.utils.common_utils import get_random_agent
 from urllib.parse import unquote, urlencode
 
@@ -21,6 +22,17 @@ ITAG_MAP = {
 }
 
 
+def _get_gdrive_headers(with_cookie=True):
+    """Build headers for Google Drive requests, optionally with auth cookies."""
+    headers = {
+        'User-Agent': get_random_agent(),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    }
+    if with_cookie and Config.GDRIVE_COOKIE:
+        headers['Cookie'] = Config.GDRIVE_COOKIE
+    return headers
+
+
 def build_video_url(base_url, html):
     url = base_url.split('?')[0]
     params = {}
@@ -36,19 +48,20 @@ async def get_video_from_gdrive_player(session: aiohttp.ClientSession, drive_url
         return None, None, None
 
     item_id = match.group(1)
-    
+    has_cookie = bool(Config.GDRIVE_COOKIE)
+
     # Check quality using get_video_info
     info_url = f'https://drive.google.com/u/0/get_video_info?docid={item_id}&drive_originator_app=303'
-    headers = {'User-Agent': get_random_agent()}
-    
+    headers = _get_gdrive_headers(with_cookie=has_cookie)
+
     quality = 'unknown'
     try:
         async with session.get(info_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
             html = await response.text()
-        
+
         if 'reason=' in html:
             return None, None, None
-        
+
         fmt_match = re.findall(r'fmt_stream_map=([^&]+)', html)
         if fmt_match:
             value = unquote(fmt_match[0])
@@ -62,26 +75,30 @@ async def get_video_from_gdrive_player(session: aiohttp.ClientSession, drive_url
                         break
     except Exception:
         pass
-    
+
     # Generate video URL using download endpoint
     video_url = f"https://drive.usercontent.google.com/download?id={item_id}"
-    headers = {
-        "User-Agent": get_random_agent(),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    }
-    
+    headers = _get_gdrive_headers(with_cookie=has_cookie)
+
     try:
         async with session.get(video_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
             text = await response.text()
-        
+
         if 'Error 404 (Not Found)' in text:
             return None, None, None
         elif not text.startswith("<!DOCTYPE html>"):
-            return video_url, quality, {'request': headers}
-        
+            # Direct download (no confirmation page) — common with auth cookies
+            request_headers = {'User-Agent': headers['User-Agent'], 'Accept': headers['Accept']}
+            if has_cookie:
+                request_headers['Cookie'] = Config.GDRIVE_COOKIE
+            return video_url, quality, {'request': request_headers}
+
         final_video_url = build_video_url(video_url, text)
-        return final_video_url, quality, {'request': headers}
-    
+        request_headers = {'User-Agent': headers['User-Agent'], 'Accept': headers['Accept']}
+        if has_cookie:
+            request_headers['Cookie'] = Config.GDRIVE_COOKIE
+        return final_video_url, quality, {'request': request_headers}
+
     except Exception:
         return None, None, None
 
