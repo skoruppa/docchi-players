@@ -102,6 +102,7 @@ async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is
         headers = {"request": {"Referer": f"https://ebd.cda.pl/620x368/{video_id}" }}
     else:
         url = video_data['video']['manifest_apple']
+        headers = {"request": {"Referer": f"https://ebd.cda.pl/620x368/{video_id}" }}
 
     if url:
         return url, highest_quality, headers
