@@ -6,6 +6,7 @@ import logging
 import aiohttp
 from urllib.parse import urlparse, urljoin
 from app.utils.common_utils import get_random_agent
+from config import Config
 
 DOMAINS = [
     'dood.watch', 'doodstream.com', 'dood.to', 'dood.so', 'dood.cx', 'dood.la', 'dood.ws',
@@ -18,6 +19,17 @@ DOMAINS = [
 NAMES = ['dood']
 
 ENABLED = True
+PROXIFY_STREAMS = Config.PROXIFY_STREAMS
+
+
+async def _get_html(session, url, headers):
+    """GET HTML — through proxy if PROXIFY_STREAMS, direct otherwise."""
+    if PROXIFY_STREAMS:
+        from app.utils.proxy_utils import proxy_get
+        text, _ = await proxy_get(session, url, headers=headers)
+        return text
+    async with session.get(url, headers=headers, allow_redirects=True) as resp:
+        return await resp.text()
 
 
 def dood_decode(data):
@@ -44,15 +56,9 @@ async def get_video_from_dood_player(session: aiohttp.ClientSession, player_url:
             'Referer': f'https://{host}/'
         }
 
-        async with session.get(web_url, headers=headers, allow_redirects=True) as response:
-            actual_url = str(response.url)
-            html = await response.text()
-
-        if actual_url != web_url:
-            host_match = re.findall(r'(?://|\.)([^/]+)', actual_url)
-            if host_match:
-                host = host_match[0]
-                web_url = f"https://{host}/d/{video_id}"
+        html = await _get_html(session, web_url, headers)
+        if not html:
+            return None, None, None
 
         headers['Referer'] = web_url
 
@@ -63,12 +69,13 @@ async def get_video_from_dood_player(session: aiohttp.ClientSession, player_url:
         match = re.search(r'<iframe\s*src="([^"]+)', html)
         if match:
             iframe_url = urljoin(web_url, match.group(1))
-            async with session.get(iframe_url, headers=headers, allow_redirects=True) as response:
-                html = await response.text()
+            html = await _get_html(session, iframe_url, headers)
         else:
             embed_url = web_url.replace('/d/', '/e/')
-            async with session.get(embed_url, headers=headers, allow_redirects=True) as response:
-                html = await response.text()
+            html = await _get_html(session, embed_url, headers)
+
+        if not html:
+            return None, None, None
 
         # Try to extract quality from page HTML
         quality = 'unknown'
@@ -87,8 +94,10 @@ async def get_video_from_dood_player(session: aiohttp.ClientSession, player_url:
         token = match.group(2)
         pass_url = urljoin(web_url, match.group(1))
 
-        async with session.get(pass_url, headers=headers, allow_redirects=True) as response:
-            base_url = (await response.text()).strip()
+        base_url = await _get_html(session, pass_url, headers)
+        if not base_url:
+            return None, None, None
+        base_url = base_url.strip()
 
         if 'cloudflarestorage.' in base_url:
             final_url = base_url
