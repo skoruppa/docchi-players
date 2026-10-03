@@ -12,9 +12,9 @@ NAMES = ['nanasubs', 'nana']
 async def get_video_from_nanasubs_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False):
     """Extract video URL and subtitles from NanaSubs episode page.
 
-    NanaSubs embeds HLS stream (vod.andawarudo.nexus) with a token directly
-    in an inline <script> that initializes their NanaPlayer. No API needed —
-    just scrape the HTML. Token is not IP-bound, no proxy required.
+    NanaSubs embeds HLS stream with a token directly in an inline <script>
+    that initializes their NanaPlayer. No API needed — just scrape the HTML.
+    Token is not IP-bound, no proxy required.
 
     Subtitles (ASS format, Polish) are returned in headers['subtitles']
     for the stream router to include in the Stremio response.
@@ -32,9 +32,9 @@ async def get_video_from_nanasubs_player(session: aiohttp.ClientSession, url: st
                 return None, None, None
             html = await response.text()
 
-        # Extract m3u8 URL from NanaPlayer config: src: 'https://vod.andawarudo.nexus/...'
+        # Extract m3u8 URL from NanaPlayer config: src: 'https://..../master.m3u8?token=...'
         match = re.search(
-            r"src:\s*'(https://vod\.andawarudo\.nexus/[^']+)'",
+            r"src:\s*'(https?://[^']+\.m3u8[^']*)'",
             html
         )
         if not match:
