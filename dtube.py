@@ -3,29 +3,23 @@ import logging
 import aiohttp
 from app.utils.common_utils import get_random_agent
 
-# Domains handled by this player
 DOMAINS = ['d.tube', 'play.d.tube']
 NAMES = ['dtube', 'd.tube']
 
-# DTube NAS servers — API sometimes returns wrong NAS, so we try alternatives
 _NAS_HOSTS = ['nas1.d.tube', 'nas2.d.tube']
 
 
 async def get_video_from_dtube_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False):
-    """Extract video URL from DTube player."""
     try:
-        # Extract media_id — supports UUIDs and alphanumeric IDs
-        # Patterns: /watch/ID, /embed/ID, ?v=ID
         match = re.search(
             r'(?://|\.)(d\.tube|play\.d\.tube)(?:/watch/|/embed/|/?\?v=)([0-9a-zA-Z_-]+(?:-[0-9a-zA-Z_-]+)*)',
             url
         )
         if not match:
-            logging.warning("[DTube] Could not extract media ID from URL")
+            logging.warning("[DTube] Could not extract media ID")
             return None, None, None
 
         media_id = match.group(2)
-
         user_agent = get_random_agent()
         headers = {
             'User-Agent': user_agent,
@@ -34,7 +28,6 @@ async def get_video_from_dtube_player(session: aiohttp.ClientSession, url: str, 
         }
 
         api_url = f'https://api.d.tube/videos/{media_id}'
-
         async with session.get(api_url, headers=headers,
                                timeout=aiohttp.ClientTimeout(total=8)) as response:
             if response.status != 200:
@@ -47,18 +40,15 @@ async def get_video_from_dtube_player(session: aiohttp.ClientSession, url: str, 
             logging.warning("[DTube] No video_url in API response")
             return None, None, None
 
-        # API sometimes points to wrong NAS — verify and try alternatives
-        stream_url = await _resolve_nas_url(session, stream_url, media_id, headers)
+        # API sometimes returns wrong NAS - try alternatives
+        stream_url = await _resolve_nas_url(session, stream_url, headers)
         if not stream_url:
             logging.warning("[DTube] Video not found on any NAS")
             return None, None, None
 
-        # Detect quality from metadata (API provides width/height)
         quality = 'unknown'
         if data.get('height'):
             quality = f"{data['height']}p"
-        elif data.get('quality'):
-            quality = str(data['quality'])
 
         stream_headers = {
             'request': {
@@ -75,9 +65,7 @@ async def get_video_from_dtube_player(session: aiohttp.ClientSession, url: str, 
         return None, None, None
 
 
-async def _resolve_nas_url(session: aiohttp.ClientSession, api_url: str, media_id: str, headers: dict) -> str | None:
-    """Verify stream URL works, try alternative NAS hosts if not."""
-    # Try the URL from API first
+async def _resolve_nas_url(session: aiohttp.ClientSession, api_url: str, headers: dict) -> str | None:
     try:
         async with session.head(api_url, headers=headers,
                                 timeout=aiohttp.ClientTimeout(total=3),
@@ -87,14 +75,11 @@ async def _resolve_nas_url(session: aiohttp.ClientSession, api_url: str, media_i
     except Exception:
         pass
 
-    # Extract path part after host
     path_match = re.search(r'https?://[^/]+(/.*)', api_url)
     if not path_match:
         return None
-
     path = path_match.group(1)
 
-    # Try each NAS host
     for nas_host in _NAS_HOSTS:
         alt_url = f'https://{nas_host}{path}'
         if alt_url == api_url:
@@ -104,7 +89,6 @@ async def _resolve_nas_url(session: aiohttp.ClientSession, api_url: str, media_i
                                     timeout=aiohttp.ClientTimeout(total=3),
                                     allow_redirects=True) as resp:
                 if resp.status == 200:
-                    logging.info(f"[DTube] Resolved to alternative NAS: {nas_host}")
                     return alt_url
         except Exception:
             continue
