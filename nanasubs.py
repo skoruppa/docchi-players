@@ -1,4 +1,5 @@
 import re
+import json
 import logging
 import aiohttp
 from app.utils.common_utils import get_random_agent
@@ -9,11 +10,14 @@ NAMES = ['nanasubs', 'nana']
 
 
 async def get_video_from_nanasubs_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False):
-    """Extract video URL from NanaSubs episode page.
+    """Extract video URL and subtitles from NanaSubs episode page.
 
     NanaSubs embeds HLS stream (vod.andawarudo.nexus) with a token directly
     in an inline <script> that initializes their NanaPlayer. No API needed —
     just scrape the HTML. Token is not IP-bound, no proxy required.
+
+    Subtitles (ASS format, Polish) are returned in headers['subtitles']
+    for the stream router to include in the Stremio response.
     """
     try:
         user_agent = get_random_agent()
@@ -39,6 +43,9 @@ async def get_video_from_nanasubs_player(session: aiohttp.ClientSession, url: st
 
         stream_url = match.group(1)
 
+        # Extract subtitles from NanaPlayer config: subtitles: [{...}]
+        subtitles = _extract_subtitles(html)
+
         # Detect quality from m3u8 playlist
         quality = 'unknown'
         stream_headers = {
@@ -48,6 +55,9 @@ async def get_video_from_nanasubs_player(session: aiohttp.ClientSession, url: st
                 'Referer': 'https://nanasubs.com.pl/',
             }
         }
+
+        if subtitles:
+            stream_headers['subtitles'] = subtitles
 
         try:
             async with session.get(stream_url, headers=stream_headers['request'],
@@ -65,6 +75,45 @@ async def get_video_from_nanasubs_player(session: aiohttp.ClientSession, url: st
     except Exception as e:
         logging.warning(f"[NanaSubs] {type(e).__name__}: {e or 'no details'}")
         return None, None, None
+
+
+def _extract_subtitles(html: str) -> list[dict] | None:
+    """Extract subtitle URLs from NanaPlayer config.
+
+    NanaPlayer config contains: subtitles: [{url: "...ass", lang: "Polskie", group: "NanaSubs", ...}]
+    Returns list of Stremio subtitle objects: [{id, url, lang}] or None.
+    """
+    match = re.search(r"subtitles:\s*(\[.*?\])\s*,", html, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        subs_data = json.loads(match.group(1))
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    stremio_subs = []
+    for i, sub in enumerate(subs_data):
+        sub_url = sub.get('url')
+        if not sub_url:
+            continue
+
+        # Map NanaSubs lang names to ISO 639-2
+        lang_map = {'polskie': 'pol', 'angielskie': 'eng', 'polish': 'pol', 'english': 'eng'}
+        lang_raw = (sub.get('lang') or 'pol').lower()
+        lang = lang_map.get(lang_raw, 'pol')
+
+        group = sub.get('group', 'NanaSubs')
+        label = f"{sub.get('lang', 'PL')} [{group}]"
+
+        stremio_subs.append({
+            'id': f"nanasubs-{lang}-{i}",
+            'url': sub_url,
+            'lang': lang,
+            'label': label,
+        })
+
+    return stremio_subs if stremio_subs else None
 
 
 if __name__ == '__main__':
