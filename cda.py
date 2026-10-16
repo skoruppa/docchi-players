@@ -3,6 +3,7 @@ import logging
 import aiohttp
 import json
 import urllib.parse
+from app.utils.common_utils import get_random_agent
 from config import Config
 
 # Domains handled by this player
@@ -13,7 +14,6 @@ PROXIFY_STREAMS = Config.PROXIFY_STREAMS
 
 # Quality slug → numeric resolution for sorting
 _Q_ORDER = {'vl': 360, 'lq': 480, 'sd': 720, 'hd': 1080}
-_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 
 def decrypt_url(url: str) -> str:
@@ -81,7 +81,8 @@ def _build_direct_mp4_url(manifest_url: str, video_id: str, quality: str) -> str
 async def _get_html(session: aiohttp.ClientSession, url: str) -> str | None:
     """Simple GET — no proxy needed, CDA streams are not IP-bound."""
     try:
-        async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        headers = {'User-Agent': get_random_agent()}
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             resp.raise_for_status()
             return await resp.text()
     except Exception as e:
@@ -92,10 +93,11 @@ async def _get_html(session: aiohttp.ClientSession, url: str) -> str | None:
 async def _post_html(session: aiohttp.ClientSession, url: str, form_data: dict) -> str | None:
     """Simple POST — no proxy needed."""
     try:
+        headers = {'User-Agent': get_random_agent()}
         data = aiohttp.FormData()
         for k, v in form_data.items():
             data.add_field(k, v)
-        async with session.post(url, data=data, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        async with session.post(url, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             resp.raise_for_status()
             return await resp.text()
     except Exception as e:
@@ -106,7 +108,8 @@ async def _post_html(session: aiohttp.ClientSession, url: str, form_data: dict) 
 async def _head_ok(session: aiohttp.ClientSession, url: str) -> bool:
     """Quick HEAD check to verify a URL is reachable (200)."""
     try:
-        async with session.head(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as resp:
+        headers = {'User-Agent': get_random_agent()}
+        async with session.head(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -149,19 +152,21 @@ async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is
         manifest_apple = video.get('manifest_apple', '')
         file_enc = video.get('file', '')
 
+        video_headers = {"request": {"User-Agent": get_random_agent()}}
+
         # Step 2: Try direct mp4 from manifest base path
         if manifest_apple:
             mp4_url = _build_direct_mp4_url(manifest_apple, video_id, highest_quality)
             if mp4_url and await _head_ok(session, mp4_url):
                 logging.info(f"[CDA] Direct mp4 {highest_quality}: {mp4_url[:80]}")
-                return mp4_url, highest_quality, None
+                return mp4_url, highest_quality, video_headers
 
         # Step 3: Fallback — legacy encrypted file field
         if file_enc:
             decrypted = decrypt_url(file_enc)
             if await _head_ok(session, decrypted):
                 logging.info(f"[CDA] Legacy mp4: {decrypted[:80]}")
-                return decrypted, highest_quality, None
+                return decrypted, highest_quality, video_headers
 
         # Re-fetch with explicit quality in case default didn't give us file
         if not file_enc:
@@ -175,7 +180,7 @@ async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is
                         decrypted = decrypt_url(file_enc)
                         if await _head_ok(session, decrypted):
                             logging.info(f"[CDA] Legacy mp4 (re-fetch): {decrypted[:80]}")
-                            return decrypted, highest_quality, None
+                            return decrypted, highest_quality, video_headers
                     # Update manifest in case first fetch didn't have it
                     if not manifest_apple:
                         manifest_apple = hq_data['video'].get('manifest_apple', '')
@@ -183,7 +188,7 @@ async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is
         # Step 4: Fallback — HLS manifest
         if manifest_apple:
             logging.info(f"[CDA] HLS fallback: {manifest_apple[:80]}")
-            return manifest_apple, highest_quality, None
+            return manifest_apple, highest_quality, video_headers
 
         return None, None, None
 
