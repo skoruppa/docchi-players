@@ -3,7 +3,6 @@ import logging
 import aiohttp
 import json
 import urllib.parse
-from app.utils.proxy_utils import generate_proxy_url
 from config import Config
 
 # Domains handled by this player
@@ -12,8 +11,13 @@ NAMES = ['cda']
 
 PROXIFY_STREAMS = Config.PROXIFY_STREAMS
 
+# Quality slug → numeric resolution for sorting
+_Q_ORDER = {'vl': 360, 'lq': 480, 'sd': 720, 'hd': 1080}
+_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
 
 def decrypt_url(url: str) -> str:
+    """Decrypt legacy CDA obfuscated mp4 URL (kept as fallback)."""
     for p in ("_XDDD", "_CDA", "_ADC", "_CXD", "_QWE", "_Q5", "_IKSDE"):
         url = url.replace(p, "")
     url = urllib.parse.unquote(url)
@@ -46,36 +50,6 @@ def get_highest_quality(qualities: dict) -> tuple:
     return highest_quality, qualities[highest_quality]
 
 
-async def _proxy_get_html(session: aiohttp.ClientSession, url: str) -> str | None:
-    """GET request through proxy with fallback."""
-    if PROXIFY_STREAMS:
-        from app.utils.proxy_utils import proxy_get
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        text, _ = await proxy_get(session, url, headers=headers)
-        return text
-    else:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            resp.raise_for_status()
-            return await resp.text()
-
-
-async def _proxy_post_html(session: aiohttp.ClientSession, url: str, form_data: dict) -> str | None:
-    """POST form data through proxy with fallback."""
-    if PROXIFY_STREAMS:
-        from app.utils.proxy_utils import proxy_post
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        body = urllib.parse.urlencode(form_data)
-        text, _ = await proxy_post(session, url, data=body, headers=headers)
-        return text
-    else:
-        data = aiohttp.FormData()
-        for k, v in form_data.items():
-            data.add_field(k, v)
-        async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            resp.raise_for_status()
-            return await resp.text()
-
-
 def _parse_player_data(html: str) -> dict | None:
     """Extract player_data JSON from CDA HTML."""
     match = re.search(r"player_data='(.*?)'\s+tabindex", html, re.DOTALL)
@@ -90,25 +64,77 @@ def _parse_player_data(html: str) -> dict | None:
         return None
 
 
+def _build_direct_mp4_url(manifest_url: str, video_id: str, quality: str) -> str | None:
+    """Build a direct mp4 URL from the manifest base path.
+
+    CDA stores segments as ``video_{numericId}_{quality}.mp4`` next to the
+    manifest.  The numeric ID is the part of video_id without trailing alpha
+    chars (e.g. ``27664708b6`` → ``27664708``).
+    """
+    base = manifest_url.rsplit('/', 1)[0]
+    numeric_id = re.match(r'(\d+)', video_id)
+    if not numeric_id:
+        return None
+    return f"{base}/video_{numeric_id.group(1)}_{quality}.mp4"
+
+
+async def _get_html(session: aiohttp.ClientSession, url: str) -> str | None:
+    """Simple GET — no proxy needed, CDA streams are not IP-bound."""
+    try:
+        async with session.get(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            resp.raise_for_status()
+            return await resp.text()
+    except Exception as e:
+        logging.warning(f"[CDA] GET failed: {e}")
+        return None
+
+
+async def _post_html(session: aiohttp.ClientSession, url: str, form_data: dict) -> str | None:
+    """Simple POST — no proxy needed."""
+    try:
+        data = aiohttp.FormData()
+        for k, v in form_data.items():
+            data.add_field(k, v)
+        async with session.post(url, data=data, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            resp.raise_for_status()
+            return await resp.text()
+    except Exception as e:
+        logging.warning(f"[CDA] POST failed: {e}")
+        return None
+
+
+async def _head_ok(session: aiohttp.ClientSession, url: str) -> bool:
+    """Quick HEAD check to verify a URL is reachable (200)."""
+    try:
+        async with session.head(url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False) -> tuple:
     """Extract video URL from CDA player.
-    
-    CDA is IP-bound — extraction goes through proxy so the resulting URL
-    is bound to the proxy's IP (which also serves the stream to the user).
+
+    Stream priority (all are NOT IP-bound, token-time-limited only):
+      1. Direct mp4 built from manifest path (best Stremio compat)
+      2. Legacy encrypted ``file`` field → decrypted mp4
+      3. HLS manifest (``manifest_apple``)
+
+    No proxy is used — CDA switched to token-auth streams that work from any IP.
     """
     url, video_id = normalize_cda_url(url)
     if not url:
         return None, None, None
 
     try:
-        # Step 1: Fetch page (through proxy if available)
-        html = await _proxy_get_html(session, url)
+        # Step 1: Fetch page
+        html = await _get_html(session, url)
         if not html:
             return None, None, None
 
         # Handle age confirmation
         if 'age_confirm' in html:
-            html = await _proxy_post_html(session, url, {'age_confirm': ''})
+            html = await _post_html(session, url, {'age_confirm': ''})
             if not html:
                 return None, None, None
 
@@ -116,41 +142,50 @@ async def get_video_from_cda_player(session: aiohttp.ClientSession, url: str, is
         if not video_data:
             return None, None, None
 
-        qualities = video_data['video']['qualities']
-        file = video_data['video'].get('file', '')
-        highest_quality, quality_id = get_highest_quality(qualities)
+        video = video_data['video']
+        qualities = video.get('qualities', {})
+        highest_quality, _ = get_highest_quality(dict(qualities))
 
-        # Step 2: Re-fetch with highest quality if needed
-        if not file or video_data['video'].get('quality') != quality_id:
+        manifest_apple = video.get('manifest_apple', '')
+        file_enc = video.get('file', '')
+
+        # Step 2: Try direct mp4 from manifest base path
+        if manifest_apple:
+            mp4_url = _build_direct_mp4_url(manifest_apple, video_id, highest_quality)
+            if mp4_url and await _head_ok(session, mp4_url):
+                logging.info(f"[CDA] Direct mp4 {highest_quality}: {mp4_url[:80]}")
+                return mp4_url, highest_quality, None
+
+        # Step 3: Fallback — legacy encrypted file field
+        if file_enc:
+            decrypted = decrypt_url(file_enc)
+            if await _head_ok(session, decrypted):
+                logging.info(f"[CDA] Legacy mp4: {decrypted[:80]}")
+                return decrypted, highest_quality, None
+
+        # Re-fetch with explicit quality in case default didn't give us file
+        if not file_enc:
             hq_url = f'{url}?wersja={highest_quality}'
-            html = await _proxy_get_html(session, hq_url)
+            html = await _get_html(session, hq_url)
             if html:
-                video_data = _parse_player_data(html)
-                if video_data:
-                    file = video_data['video'].get('file', '')
+                hq_data = _parse_player_data(html)
+                if hq_data:
+                    file_enc = hq_data['video'].get('file', '')
+                    if file_enc:
+                        decrypted = decrypt_url(file_enc)
+                        if await _head_ok(session, decrypted):
+                            logging.info(f"[CDA] Legacy mp4 (re-fetch): {decrypted[:80]}")
+                            return decrypted, highest_quality, None
+                    # Update manifest in case first fetch didn't have it
+                    if not manifest_apple:
+                        manifest_apple = hq_data['video'].get('manifest_apple', '')
 
-        # Step 3: Build video URL
-        if file:
-            video_url = decrypt_url(file)
-        else:
-            video_url = video_data['video'].get('manifest_apple', '')
+        # Step 4: Fallback — HLS manifest
+        if manifest_apple:
+            logging.info(f"[CDA] HLS fallback: {manifest_apple[:80]}")
+            return manifest_apple, highest_quality, None
 
-        if not video_url:
-            return None, None, None
-
-        referer = f"https://ebd.cda.pl/620x368/{video_id}"
-
-        # Step 4: Proxy the stream URL (IP-bound)
-        if PROXIFY_STREAMS:
-            is_hls = video_url.endswith('.m3u8') or '/manifest' in video_url
-            proxy_endpoint = '/proxy/hls/manifest.m3u8' if is_hls else '/proxy/stream'
-            video_url = await generate_proxy_url(
-                session, video_url, proxy_endpoint,
-                request_headers={"Referer": referer}
-            )
-            return video_url, highest_quality, None
-
-        return video_url, highest_quality, {"request": {"Referer": referer}}
+        return None, None, None
 
     except Exception as e:
         logging.warning(f"[CDA] {type(e).__name__}: {e or 'no details'}")
