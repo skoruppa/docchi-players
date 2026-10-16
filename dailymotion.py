@@ -78,7 +78,7 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
                             manifest = await resp.text()
                             # Parse NAME and sub-playlist URL pairs
                             streams = re.findall(
-                                r'RESOLUTION=\d+x(\d+),NAME="(\d+)".*?\n(https?://[^\s]+)',
+                                r'RESOLUTION=\d+x(\d+),NAME="(\d+)".*?\n(https?://[^\s#]+)',
                                 manifest
                             )
                             if streams:
