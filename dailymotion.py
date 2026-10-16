@@ -43,12 +43,15 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
         if not quals:
             return None, None, None
 
-        # Headers Stremio must send (CDN requires Origin + Referer)
+        # Headers Stremio must send (CDN requires Origin + Referer + Sec-Fetch)
         video_headers = {
             "request": {
                 "User-Agent": user_agent,
                 "Origin": "https://www.dailymotion.com",
                 "Referer": "https://www.dailymotion.com/",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
             }
         }
 
