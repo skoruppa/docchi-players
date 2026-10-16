@@ -7,12 +7,6 @@ from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
 DOMAINS = ['dailymotion.com', 'dai.ly']
 NAMES = ['dailymotion']
 
-# Headers required by Dailymotion CDN (CORS + Sec-Fetch)
-_DM_HEADERS = {
-    'Origin': 'https://www.dailymotion.com',
-    'Referer': 'https://www.dailymotion.com/',
-}
-
 
 async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url: str, is_vip: bool = False) -> tuple:
     try:
@@ -28,15 +22,8 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
 
         headers = {
             'User-Agent': user_agent,
-            **_DM_HEADERS,
-        }
-
-        # Sec-Fetch headers needed to fetch HLS manifest from CDN
-        fetch_headers = {
-            **headers,
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-site',
+            'Origin': 'https://www.dailymotion.com',
+            'Referer': 'https://www.dailymotion.com/',
         }
 
         # Warm-up session to get cookies (dmvk etc.)
@@ -56,7 +43,14 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
         if not quals:
             return None, None, None
 
-        video_headers = {"request": {"User-Agent": user_agent, **_DM_HEADERS}}
+        # Headers Stremio must send (CDN requires Origin + Referer)
+        video_headers = {
+            "request": {
+                "User-Agent": user_agent,
+                "Origin": "https://www.dailymotion.com",
+                "Referer": "https://www.dailymotion.com/",
+            }
+        }
 
         # Priority 1: Direct MP4 (if available)
         for q in ['1080', '720', '480', '380', '240']:
@@ -67,33 +61,26 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
                         if mp4_url:
                             return mp4_url, f'{q}p', video_headers
 
-        # Priority 2: HLS — fetch manifest, extract best sub-playlist
+        # Priority 2: HLS master manifest
         auto_qual = quals.get('auto', [])
         if auto_qual:
             master_url = auto_qual[0].get('url')
             if master_url:
+                # Resolve quality from manifest
+                fetch_headers = {
+                    **headers,
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-site',
+                }
+                quality = 'auto'
                 try:
                     async with session.get(master_url, headers=fetch_headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                         if resp.status == 200:
                             manifest = await resp.text()
-                            # Parse NAME and sub-playlist URL pairs
-                            streams = re.findall(
-                                r'RESOLUTION=\d+x(\d+),NAME="(\d+)".*?\n(https?://[^\s#]+)',
-                                manifest
-                            )
-                            if streams:
-                                # Sort by resolution, pick highest
-                                streams.sort(key=lambda s: int(s[0]))
-                                best_res, best_name, best_url = streams[-1]
-                                # Sub-playlists on vod CDN don't need special headers
-                                return best_url, f'{best_name}p', None
-                except Exception as e:
-                    logging.warning(f"[Dailymotion] Manifest fetch failed: {e}")
-
-                # Fallback: return master manifest URL with headers for Stremio
-                quality = 'unknown'
-                try:
-                    quality = await fetch_resolution_from_m3u8(session, master_url, fetch_headers) or quality
+                            names = re.findall(r'NAME="(\d+)"', manifest)
+                            if names:
+                                quality = max(names, key=int) + 'p'
                 except Exception:
                     pass
                 return master_url, quality, video_headers
