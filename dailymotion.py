@@ -1,7 +1,7 @@
 import re
 import logging
 import aiohttp
-from app.utils.common_utils import get_random_agent, fetch_resolution_from_m3u8
+from app.utils.common_utils import get_random_agent
 
 # Domains handled by this player
 DOMAINS = ['dailymotion.com', 'dai.ly']
@@ -69,21 +69,16 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
         if auto_qual:
             master_url = auto_qual[0].get('url')
             if master_url:
-                # Resolve quality from manifest
-                fetch_headers = {
-                    **headers,
-                    'Sec-Fetch-Dest': 'empty',
-                    'Sec-Fetch-Mode': 'cors',
-                    'Sec-Fetch-Site': 'same-site',
-                }
+                # Resolve quality — fetch manifest ourselves (CDN needs Sec-Fetch headers)
+                fetch_headers = {**headers, 'Sec-Fetch-Dest': 'empty', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Site': 'same-site'}
                 quality = 'auto'
                 try:
                     async with session.get(master_url, headers=fetch_headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                         if resp.status == 200:
                             manifest = await resp.text()
-                            names = re.findall(r'NAME="(\d+)"', manifest)
-                            if names:
-                                quality = max(names, key=int) + 'p'
+                            resolutions = re.findall(r'RESOLUTION=\d+x(\d+)', manifest)
+                            if resolutions:
+                                quality = f"{max(int(h) for h in resolutions)}p"
                 except Exception:
                     pass
                 return master_url, quality, video_headers
