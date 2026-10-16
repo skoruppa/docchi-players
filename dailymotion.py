@@ -79,8 +79,10 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
                             resolutions = re.findall(r'RESOLUTION=\d+x(\d+)', manifest)
                             if resolutions:
                                 quality = f"{max(int(h) for h in resolutions)}p"
-                except Exception:
-                    pass
+                        else:
+                            logging.warning(f"[Dailymotion] Manifest fetch status {resp.status}")
+                except Exception as e:
+                    logging.warning(f"[Dailymotion] Manifest quality resolve failed: {e}")
                 return master_url, quality, video_headers
 
         return None, None, None
