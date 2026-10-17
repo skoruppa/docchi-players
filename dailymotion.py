@@ -71,7 +71,7 @@ async def get_video_from_dailymotion_player(session: aiohttp.ClientSession, url:
             if master_url:
                 # Resolve quality — fetch manifest ourselves (CDN needs Sec-Fetch headers)
                 fetch_headers = {**headers, 'Sec-Fetch-Dest': 'empty', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Site': 'same-site'}
-                quality = 'auto'
+                quality = None
                 try:
                     async with session.get(master_url, headers=fetch_headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                         if resp.status == 200:
