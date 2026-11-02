@@ -38,6 +38,7 @@ A collection of async Python video player extractors for anime streaming sites. 
 | Vidtube | vidtube.one | |
 | VK | vk.com, vkvideo.ru | |
 | VOE | voe.sx | ✓ |
+| YourUpload | yourupload.com, yucache.net | |
 
 **Proxy Required** = player streams are IP-bound; extraction must happen from the same IP that will play the stream. Use [MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy) or similar.
 
