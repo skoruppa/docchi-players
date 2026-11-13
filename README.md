@@ -7,7 +7,7 @@ A collection of async Python video player extractors for anime streaming sites. 
 | Player | Domains | Proxy Required |
 |--------|---------|:-:|
 | ABStream | abstream.to | |
-| Abyss (HydraX) | abysscdn.com | |
+| Abyss (HydraX) | abysscdn.com, playhydrax.com | |
 | Buzzheavier | buzzheavier.com | ✓ |
 | CDA | cda.pl | |
 | Dailymotion | dailymotion.com | |

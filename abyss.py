@@ -9,7 +9,7 @@ from app.utils.common_utils import get_random_agent
 from app.players.test import run_tests
 
 # Domains handled by this player
-DOMAINS = ['abysscdn.com', 'abyssplayer.com', 'hydraxcdn.biz', 'short.icu', 'embedplayabyss.top']
+DOMAINS = ['abysscdn.com', 'abyssplayer.com', 'hydraxcdn.biz', 'playhydrax.com', 'short.icu', 'embedplayabyss.top']
 NAMES = ['abyss']
 
 ENABLED = True
@@ -321,5 +321,6 @@ async def get_video_from_abyss_player(session: aiohttp.ClientSession, url: str, 
 if __name__ == '__main__':
     urls_to_test = [
         "https://abysscdn.com/?v=Q1a8w6rjA",
+        "https://playhydrax.com/?v=oT8QaMhUE",
     ]
     run_tests(get_video_from_abyss_player, urls_to_test)
