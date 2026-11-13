@@ -15,6 +15,7 @@ A collection of async Python video player extractors for anime streaming sites. 
 | EarnVid / VidHide | earnvid.com, vidhide.com | |
 | Filemoon / Byse | filemoon.sx, byse*.com, + many mirrors | ✓ |
 | Google Drive | drive.google.com | |
+| HexLoad / HexUpload | hexload.com, hexupload.net | |
 | Lulustream | luluvdo.com, lulu.st | |
 | Lycoris.cafe | lycoris.cafe | |
 | MP4Upload | mp4upload.com | |
@@ -26,6 +27,7 @@ A collection of async Python video player extractors for anime streaming sites. 
 | Sibnet | sibnet.ru | |
 | Streamtape | streamtape.com | ✓ |
 | StreamUP | strmup.to | |
+| StreamWish / StreamHG | hgcloud.to, streamwish.to, + many mirrors | ✓ |
 | Turbovid | turboviplay.com | |
 | UPnShare / RPMShare | upns.pro, rpmhub.site | |
 | Uqload | uqload.com | ✓ |
@@ -37,6 +39,7 @@ A collection of async Python video player extractors for anime streaming sites. 
 | Vids.st | vids.st | |
 | Vidtube | vidtube.one | |
 | VK | vk.com, vkvideo.ru | |
+| vTube | vtbe.to, vtube.to | |
 | VOE | voe.sx | ✓ |
 | YourUpload | yourupload.com, yucache.net | |
 
